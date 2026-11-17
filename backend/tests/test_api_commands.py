@@ -204,7 +204,9 @@ def test_sequence_endpoints(http, control, passwords, alice):
     declare_all_empty(alice)
     control.barcodes[(0, 9)] = "KQZ-TBW"
     http.app.state.queue.set_frame(normalise_frame(frame("KQZ-TBW", 0, 9)), ["1" * 24], user="alice")
-    assert len(bob.get("/api/sequences/verify_frames/plan").json()["steps"]) == 3
+    plan = bob.get("/api/sequences/verify_frames/plan").json()
+    assert len(plan["steps"]) == 4  # the frame, and three lines under it
+    assert [len(section["children"]) for section in plan["outline"]] == [3]
 
     with observer.websocket() as ws:
         ws.receive_json()

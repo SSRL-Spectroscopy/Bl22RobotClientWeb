@@ -181,8 +181,114 @@ async def test_plan_shows_foil_energies_and_order(rig):
     assert "Crystal Si-111" in steps[0]
     # Fe K (7112 eV) comes before Ni K (8333 eV), whatever the portal's order
     assert text.index("Fe K: reference foil Fe") < text.index("Ni K: reference foil Ni")
-    assert "Left-A EXAFS transmission + sdd, unfocused: 6912 to 8112 eV, 8 sweeps of 240 s" in text
-    assert steps[-1] == "Return the reference foil and the FY filter"
+    assert "  Left-A Fe K EXAFS transmission + sdd, unfocused: 6912 to 8112 eV, 8 sweeps of 240 s" in steps
+    assert steps[-2:] == ["Return the reference foil and the FY filter", "  Return the reference foil Ni"]
+    assert rig.sent() == [] and rig.portal_writes() == []  # working out the plan sends nothing
+
+
+def walk(nodes, depth=0):
+    for node in nodes:
+        yield depth, node
+        yield from walk(node["children"], depth + 1)
+
+
+async def test_the_step_tree_is_detailed_and_the_run_follows_it(rig):
+    rig.add("KQZ-TBW", [M1, M3])
+    plan = rig.engine.outline("measure")
+    assert [n["title"] for n in plan] == [
+        "Crystal Si-111: report 1 frame(s) to the portal as scheduled",
+        "Frame KQZ-TBW from container 0, slot 9",
+        "Return the reference foil and the FY filter",
+    ]
+    frame = plan[1]["children"]
+    assert [n["title"] for n in frame] == [
+        "Get the frame and check its barcode",
+        "Fe K: reference foil Fe, optimise the beamline",
+        "Align the frame in the beam",
+        "Left-A Fe K EXAFS transmission + sdd, unfocused: 6912 to 8112 eV, 8 sweeps of 240 s",
+        "Ni K: reference foil Ni, optimise the beamline",
+        "Right-C Ni K EXAFS transmission, unfocused: 8133 to 9333 eV, 8 sweeps of 160 s",
+        "Return the frame to storage",
+    ]
+    assert [n["title"] for n in frame[1]["children"]] == [
+        "Return frame KQZ-TBW to container 0, slot 9 for the exchange",
+        "Get the reference foil Fe",
+        "Get frame KQZ-TBW again",
+        "Fill the ion chambers",
+        "Set the slits to 4.00 x 10.00 mm",
+        "Detune the mono: 0.27 at 7512 eV",
+        "Set the slits to 1.08 x 4.24 mm",
+        "Align the table",
+        "Set the amplifier gain at 6912, 7127 and 8112 eV",
+        "Calibrate the mono on Fe K (Si-111)",
+    ]
+    # the second edge knows that the Fe foil is loaded by then and has to go back first
+    assert [n["title"] for n in frame[4]["children"]][:3] == [
+        "Return frame KQZ-TBW to container 0, slot 9 for the exchange",
+        "Return the reference foil Fe",
+        "Get the reference foil Ni",
+    ]
+    assert all(n["state"] == "planned" and n["started"] is None for _, n in walk(plan))
+
+    assert (await rig.run())["state"] == "finished"
+    ran = rig.store.get("sequence_outline")["nodes"]
+    # the run did exactly what was planned: same steps, all done, each with its times
+    assert [(d, n["title"]) for d, n in walk(ran)] == [(d, n["title"]) for d, n in walk(plan)]
+    assert all(n["state"] == "done" and n["finished"] >= n["started"] for _, n in walk(ran))
+
+
+async def test_the_step_tree_points_at_the_running_line(rig):
+    rig.add("KQZ-TBW", [M3])
+    rig.server.slow[("SCAN", "START_XAS_SCAN")] = 0.4
+    rig.engine.start("measure", user="alice")
+    await rig.until(lambda: rig.step().startswith("Scan"))
+    nodes = list(walk(rig.store.get("sequence_outline")["nodes"]))
+    running = [(depth, n["kind"], n["title"]) for depth, n in nodes if n["state"] == "running"]
+    assert running == [
+        (0, "section", "Frame KQZ-TBW from container 0, slot 9"),
+        (1, "section", "Right-C Ni K EXAFS transmission, unfocused: 8133 to 9333 eV, 8 sweeps of 160 s"),
+        (2, "line", "Scan Right-C Ni K EXAFS: 8 sweeps of 160 s"),
+    ]
+    states = [n["state"] for _, n in nodes]
+    assert states.index("running") > states.index("done") and "planned" in states[states.index("running"):]
+    assert (await rig.finish())["state"] == "finished"
+
+
+async def test_what_was_not_planned_is_inserted_and_what_is_passed_over_is_skipped(rig):
+    rig.add("KQZ-TBW", [M3])
+    rig.add("ABC-DEF", [M4])
+    rig.server.barcodes[(0, 9)] = "XXX-YYY"  # the first frame turns out to be another one
+    assert (await rig.run())["state"] == "finished"
+    first, second = rig.store.get("sequence_outline")["nodes"][1:3]
+    assert first["state"] == "done"
+    get = first["children"][0]
+    assert [(n["title"], n["state"]) for n in get["children"]][-2:] == [
+        ("Return the frame to container 0, slot 9", "done"),
+        ("Report the frame to the portal as back in storage", "done"),
+    ]
+    assert {n["state"] for n in first["children"][1:]} == {"skipped"}
+    assert all(n["state"] == "skipped" for _, n in walk(first["children"][1:]))
+    # the plan expected the Ni foil of the first frame to be loaded; it is not, so
+    # returning it is passed over
+    edge = second["children"][1]
+    assert ("Return the reference foil Ni", "skipped") in [(n["title"], n["state"]) for n in edge["children"]]
+    assert ("Get the reference foil Fe", "done") in [(n["title"], n["state"]) for n in edge["children"]]
+
+
+async def test_a_failure_marks_the_line_and_leaves_the_rest_planned(rig):
+    rig.add("KQZ-TBW", [M3])
+    rig.server.refuse.add(("SCAN", "START_XAS_SCAN"))
+    assert (await rig.run())["state"] == "failed"
+    nodes = list(walk(rig.store.get("sequence_outline")["nodes"]))
+    failed = [(n["kind"], n["title"]) for _, n in nodes if n["state"] == "failed"]
+    assert failed == [
+        ("section", "Frame KQZ-TBW from container 0, slot 9"),
+        ("section", "Right-C Ni K EXAFS transmission, unfocused: 8133 to 9333 eV, 8 sweeps of 160 s"),
+        ("line", "Scan Right-C Ni K EXAFS: 8 sweeps of 160 s"),
+    ]
+    assert [n["title"] for _, n in nodes if n["state"] == "planned"][:2] == [
+        "Upload the 8 sweeps to the portal", "Report the measurement to the portal as done",
+    ]
 
 
 async def test_the_queue_lists_measurements_in_run_order(rig, tmp_path):

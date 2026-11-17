@@ -97,9 +97,10 @@ VERIFY_BOTH = [
 
 async def test_plan_lists_the_steps_before_anything_moves(rig):
     steps = rig.engine.plan("verify_frames")
-    assert len(steps) == 6
-    assert steps[0] == "Get the frame from container 0, slot 9"
-    assert steps[1] == "Read its barcode and compare it with KQZ-TBW"
+    assert len(steps) == 8  # per frame: a heading and three lines
+    assert steps[0] == "Frame KQZ-TBW in container 0, slot 9"
+    assert steps[1] == "  Get the frame from container 0, slot 9"
+    assert steps[2] == "  Read its barcode and compare it with KQZ-TBW"
     assert rig.sent() == []
 
 

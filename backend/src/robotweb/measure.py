@@ -87,12 +87,12 @@ def place_argument(measurement: dict) -> str:
     return f"{plate} {_SIDES[side.lower()]} {number} {_FY_DETECTION[detection]}"
 
 
-# ---- plan ---------------------------------------------------------------------
+# ---- before the start -------------------------------------------------------------
 
 
-def plan(engine: "SequenceEngine") -> list[str]:
-    """The steps the run would take now, for the operator to read before
-    starting. Raises MeasureError if the run cannot start."""
+def check(engine: "SequenceEngine") -> None:
+    """Raises MeasureError if the run cannot start now. The steps themselves
+    are worked out by a dry run of run() (sequence.py)."""
     equipment = engine.equipment
     for item, word in ((REFERENCE, "reference foil"), (FILTER, "FY filter")):
         if not equipment.is_known(item):
@@ -105,56 +105,33 @@ def plan(engine: "SequenceEngine") -> list[str]:
     frames = _frames_to_run(engine.queue.items)
     if not frames:
         raise MeasureError("The queue holds no measurements to run.")
-
-    steps = [f"Crystal {cut}. Report {len(frames)} frame(s) to the portal as scheduled."]
-    if engine.beam is not None:
-        watch = engine.beam
-        steps.append(
-            f"Throughout: wait while the SPEAR current is below {watch.low_ma:g} mA, and go on "
-            f"{watch.settle_s / 60:g} min after it is above {watch.ok_ma:g} mA"
-        )
     for item in frames:
-        steps.append(
-            f"Frame {item['barcode']} from container {item['container']}, slot {item['slot']}: "
-            "get it, check its barcode, align it once"
-        )
-        edge = None
-        for m in _ordered(engine, item):
-            setup = _setup(engine, m, cut)
+        try:
+            measurements = engine.science.ordered(_open_measurements(item))
+        except ScienceError as exc:
+            raise MeasureError(f"Frame {item['barcode']}: {exc}.") from exc
+        for m in measurements:
+            try:
+                engine.science.setup(m, cut)
+            except ScienceError as exc:
+                raise MeasureError(f"{describe(m)}: {exc}.") from exc
             place_argument(m)
-            if setup.edge_key != edge:
-                edge = setup.edge_key
-                steps.append(
-                    f"  {setup.element} {setup.edge}: reference foil {setup.foil_element}, "
-                    f"optimise the beamline (detune {setup.detune_factor:.2f} at {setup.mid_energy:.0f} eV)"
-                )
-            extra = f", FY filter {setup.fy_filter}" if setup.fy_filter else ""
-            again = " (measure again)" if m.get("status") not in (None, "pending") else ""
-            steps.append(
-                f"    {m['position']} {setup.technique.upper()} {setup.detection.replace('_', ' + ')}, "
-                f"{setup.beam}{extra}: {setup.e1:.0f} to {setup.e2:.0f} eV, "
-                f"{setup.sweeps} sweeps of {setup.scan_time:.0f} s{again}"
-            )
-        steps.append(f"  Return frame {item['barcode']} and report it as back in storage")
-    steps.append("Return the reference foil and the FY filter")
-    return steps
 
 
-def _ordered(engine: "SequenceEngine", item: dict) -> list[dict]:
-    try:
-        return engine.science.ordered(_open_measurements(item))
-    except ScienceError as exc:
-        raise MeasureError(f"Frame {item['barcode']}: {exc}.") from exc
-
-
-def _setup(engine: "SequenceEngine", measurement: dict, cut: str) -> Setup:
-    try:
-        return engine.science.setup(measurement, cut)
-    except ScienceError as exc:
-        raise MeasureError(f"{describe(measurement)}: {exc}.") from exc
+def _title(m: dict, s: Setup) -> str:
+    extra = f", FY filter {s.fy_filter}" if s.fy_filter else ""
+    again = " (measure again)" if m.get("status") not in (None, "pending") else ""
+    return (
+        f"{m['position']} {s.element} {s.edge} {s.technique.upper()} {s.detection.replace('_', ' + ')}, "
+        f"{s.beam}{extra}: {s.e1:.0f} to {s.e2:.0f} eV, {s.sweeps} sweeps of {s.scan_time:.0f} s{again}"
+    )
 
 
 # ---- run ----------------------------------------------------------------------
+#
+# run() is also run "dry" to work out the plan (sequence.py): then nothing is
+# sent, ctx.queue, ctx.equipment and ctx.portal are stand-ins, and requests
+# answer with the value given as dry=.
 
 
 async def run(ctx: "Context") -> None:
@@ -162,16 +139,18 @@ async def run(ctx: "Context") -> None:
     if cut is None:
         raise MeasureError("The crystal values are not known.")
     ctx.needs_beam = True
-    for item in _frames_to_run(ctx.queue.items):
+    frames = _frames_to_run(ctx.queue.items)
+    for item in frames:
         ctx.queue.mark(item["barcode"], "queued")
         for m in _open_measurements(item):
             ctx.queue.mark_measurement(item["barcode"], m["id"], "queued")
 
     scheduled: set[str] = set()  # frames this run reported as scheduled
     try:
-        for item in _frames_to_run(ctx.queue.items):
-            await _schedule(ctx, item["barcode"], scheduled)
-        await _motor(ctx, "OPTIC_VERT", sci.OPTIC_VERT_PIPE)
+        async with ctx.section("start", f"Crystal {cut}: report {len(frames)} frame(s) to the portal as scheduled"):
+            for item in frames:
+                await _schedule(ctx, item["barcode"], scheduled)
+            await _motor(ctx, "OPTIC_VERT", sci.OPTIC_VERT_PIPE)
         while True:
             # Pick the next frame only after the checkpoint: while the run is
             # paused, the operator may change the frames not yet started.
@@ -182,9 +161,12 @@ async def run(ctx: "Context") -> None:
             if item is None:
                 break
             await _schedule(ctx, item["barcode"], scheduled)
-            await _run_frame(ctx, item, cut)
+            where = f"container {item['container']}, slot {item['slot']}"
+            async with ctx.section(f"frame:{item['barcode']}", f"Frame {item['barcode']} from {where}"):
+                await _run_frame(ctx, item, cut)
             scheduled.discard(item["barcode"])
-        await _return_foil_and_filter(ctx)
+        async with ctx.section("end", "Return the reference foil and the FY filter"):
+            await _return_foil_and_filter(ctx)
     except Exception as exc:
         from .sequence import _Aborted  # here, because sequence.py imports this module
 
@@ -199,22 +181,28 @@ async def run(ctx: "Context") -> None:
 async def _run_frame(ctx: "Context", item: dict, cut: str) -> None:
     barcode, container, slot = item["barcode"], item["container"], item["slot"]
     where = f"container {container}, slot {slot}"
-    await ctx.command("get_frame", {"container": container, "slot": slot}, label=f"Get frame {barcode} from {where}")
-    fresh = normalise_frame(await ctx.portal.set_frame_state(barcode, "loaded"))
-    ctx.queue.mark(barcode, "loaded")
-    ctx.log(f"Portal: frame {barcode} is loaded")
+    async with ctx.section("get", "Get the frame and check its barcode"):
+        await ctx.command(
+            "get_frame", {"container": container, "slot": slot}, label=f"Get frame {barcode} from {where}"
+        )
+        async with ctx.step("Report the frame to the portal as loaded"):
+            raw = await ctx.portal.set_frame_state(barcode, "loaded")
+        ctx.queue.mark(barcode, "loaded")
+        ctx.log(f"Portal: frame {barcode} is loaded")
 
-    lines = await ctx.ask("SCHEDULER GET_BARCODE", label="Read the barcode")
-    found = lines[0].strip().upper() if lines else ""
-    if found != barcode:
-        note = "no barcode could be read" if found in NO_TAG else f"the frame in this slot carries {found}"
-        ctx.log(f"Frame from {where}: {note}; the portal lists {barcode} there. Skipping it.", "error")
-        await ctx.command("return_frame", label=f"Return the frame to {where}")
-        await ctx.portal.set_frame_state(barcode, "internal_storage")
-        ctx.queue.mark(barcode, "mismatch", note)
-        return
+        lines = await ctx.ask("SCHEDULER GET_BARCODE", label="Read the barcode", dry=[barcode])
+        found = lines[0].strip().upper() if lines else ""
+        if found != barcode:
+            note = "no barcode could be read" if found in NO_TAG else f"the frame in this slot carries {found}"
+            ctx.log(f"Frame from {where}: {note}; the portal lists {barcode} there. Skipping it.", "error")
+            await ctx.command("return_frame", label=f"Return the frame to {where}")
+            async with ctx.step("Report the frame to the portal as back in storage"):
+                await ctx.portal.set_frame_state(barcode, "internal_storage")
+            ctx.queue.mark(barcode, "mismatch", note)
+            return
 
-    in_portal = {m["id"]: m for m in fresh["measurements"]}
+    # What the portal holds for each measurement (status, last batch and sweep).
+    in_portal = {} if ctx.dry else {m["id"]: m for m in normalise_frame(raw)["measurements"]}
     aligned = False
     edge = None  # None at the start of every frame: each frame is optimised at least once
     optimised_at: int | None = None  # the beam-loss count when the beamline was last optimised
@@ -223,31 +211,43 @@ async def _run_frame(ctx: "Context", item: dict, cut: str) -> None:
         while not measured:
             await ctx.checkpoint()
             setup = ctx.science.setup(measurement, cut)
+            name = f"{setup.element} {setup.edge}"
             if setup.edge_key != edge:
-                ctx.log(f"New element or edge: {setup.element} {setup.edge}")
-                await _exchange(ctx, item, setup)
-                edge, optimised_at = setup.edge_key, None
+                ctx.log(f"New element or edge: {name}")
+                async with ctx.section(
+                    f"edge:{setup.edge_key}", f"{name}: reference foil {setup.foil_element}, optimise the beamline"
+                ):
+                    await _exchange(ctx, item, setup)
+                    edge = setup.edge_key
+                    await ctx.checkpoint()  # waits until there is beam
+                    optimised_at = ctx.beam_losses
+                    await _optimise(ctx, setup)
             elif setup.fy_filter and ctx.equipment.value(FILTER) != setup.fy_filter:
-                await _exchange(ctx, item, setup)
-            # Optimise for a new edge, and again whenever the beam was lost
-            # since (or during) the last optimisation.
+                async with ctx.section(f"filter:{measurement['id']}", f"Exchange the FY filter for {setup.fy_filter}"):
+                    await _exchange(ctx, item, setup)
+            # Optimise again whenever the beam was lost since (or during) the
+            # last optimisation.
             while optimised_at != ctx.beam_losses:
-                if optimised_at is not None:
-                    ctx.log("The beam was lost since the beamline was optimised: optimising again")
-                await ctx.checkpoint()  # waits until the beam is back
-                optimised_at = ctx.beam_losses
-                await _optimise(ctx, setup)
+                ctx.log("The beam was lost since the beamline was optimised: optimising again")
+                async with ctx.section("again", f"{name}: the beam was lost, optimise the beamline again"):
+                    await ctx.checkpoint()  # waits until the beam is back
+                    optimised_at = ctx.beam_losses
+                    await _optimise(ctx, setup)
             if not aligned:
-                await _align_frame(ctx)
+                async with ctx.section("align", "Align the frame in the beam"):
+                    await _align_frame(ctx)
                 aligned = True
             try:
-                measured = await _measure(ctx, item, measurement, setup, in_portal)
+                async with ctx.section(f"m:{measurement['id']}", _title(measurement, setup)):
+                    measured = await _measure(ctx, item, measurement, setup, in_portal)
             except BaseException:
                 ctx.queue.mark_measurement(barcode, measurement["id"], "failed")
                 raise
 
-    await ctx.command("return_frame", label=f"Return frame {barcode} to {where}")
-    await ctx.portal.set_frame_state(barcode, "internal_storage")
+    async with ctx.section("return", "Return the frame to storage"):
+        await ctx.command("return_frame", label=f"Return frame {barcode} to {where}")
+        async with ctx.step("Report the frame to the portal as back in storage"):
+            await ctx.portal.set_frame_state(barcode, "internal_storage")
     ctx.queue.mark(barcode, "done")
     ctx.log(f"Frame {barcode} is complete and back in storage")
 
@@ -305,7 +305,7 @@ async def _align_frame(ctx: "Context") -> None:
     await _motor(ctx, "SOL_VERT", sci.SOL_VERT_PARKED)
     await _motor(ctx, "PIPS_VERT", sci.PIPS_VERT_PARKED)
     await _motor(ctx, "OPTIC_VERT", sci.OPTIC_VERT_PARKED)
-    lines = await ctx.ask("SCAN GET_MONO_ENERGY", label="Read the mono energy")
+    lines = await ctx.ask("SCAN GET_MONO_ENERGY", label="Read the mono energy", dry=["0"])
     try:
         energy = float(lines[0])
     except (IndexError, ValueError):
@@ -356,10 +356,11 @@ async def _measure(ctx: "Context", item: dict, m: dict, s: Setup, portal_measure
     # portal starts a new batch once it is pending again.
     await ctx.checkpoint()
     in_portal = portal_measurements.get(m["id"])
-    if in_portal is None or in_portal.get("status") != "pending":
+    if not ctx.dry and (in_portal is None or in_portal.get("status") != "pending"):
         in_portal = await ctx.portal.set_measurement_status(m["id"], "pending")
         portal_measurements[m["id"]] = in_portal
         ctx.log(f"Portal: {what} set back to pending, to be measured again")
+    in_portal = in_portal or {}
     batch = (in_portal.get("last_batch") or 0) + 1
     first_sweep = (in_portal.get("last_sweep") or 0) + 1
 
@@ -371,7 +372,10 @@ async def _measure(ctx: "Context", item: dict, m: dict, s: Setup, portal_measure
     await ctx.checkpoint()  # waits here if the beam is lost right now
     losses = ctx.beam_losses
     answer = await ctx.command(
-        "xas_fy_scan" if s.is_sdd else "xas_scan", args, label=f"Scan {what}: {s.sweeps} sweeps of {s.scan_time:.0f} s"
+        "xas_fy_scan" if s.is_sdd else "xas_scan",
+        args,
+        label=f"Scan {what}: {s.sweeps} sweeps of {s.scan_time:.0f} s",
+        dry=[scan],
     )
     if ctx.beam_losses != losses:
         ctx.log(f"The beam was lost during the scan of {what}: nothing is uploaded, the scan will be repeated", "error")
@@ -384,11 +388,13 @@ async def _measure(ctx: "Context", item: dict, m: dict, s: Setup, portal_measure
 
     post = "POST_XAS_FY_SCAN" if s.is_sdd else "POST_XAS_SCAN"
     tail = f"{s.technique.upper()} {s.element} {s.edge} {s.detection.upper()} {s.beam.upper()}"
-    for n in range(s.sweeps):
-        await ctx.ask(
-            f"SCAN {post} {data_name} {n + 1} {m['id']} {first_sweep + n} {batch} {tail}",
-            label=f"Upload sweep {n + 1} of {s.sweeps}",
-        )
+    async with ctx.step(f"Upload the {s.sweeps} sweeps to the portal"):
+        for n in range(s.sweeps):
+            await ctx.ask(
+                f"SCAN {post} {data_name} {n + 1} {m['id']} {first_sweep + n} {batch} {tail}",
+                label=f"Upload sweep {n + 1} of {s.sweeps}",
+                line=False,
+            )
     ctx.log(f"Uploaded {s.sweeps} sweeps of {what} as batch {batch}")
     ctx.queue.mark_measurement(barcode, m["id"], "uploaded")
 
@@ -413,7 +419,8 @@ async def _conclude(ctx: "Context", barcode: str, m: dict, what: str) -> None:
     before it is reported done.
     """
     await ctx.checkpoint()
-    await ctx.portal.set_measurement_status(m["id"], "done")
+    async with ctx.step("Report the measurement to the portal as done"):
+        await ctx.portal.set_measurement_status(m["id"], "done")
     ctx.queue.mark_measurement(barcode, m["id"], "done")
     ctx.log(f"Portal: {what} is done")
 
@@ -434,7 +441,8 @@ async def _schedule(ctx: "Context", barcode: str, scheduled: set[str]) -> None:
         return
     state = (await ctx.portal.frame(barcode)).get("state")
     if state == "internal_storage":
-        await ctx.portal.set_frame_state(barcode, "scheduled")
+        async with ctx.step(f"Report frame {barcode} to the portal as scheduled"):
+            await ctx.portal.set_frame_state(barcode, "scheduled")
     elif state != "scheduled":
         raise MeasureError(
             f"The portal lists frame {barcode} as '{state}'. It must be in internal storage before it can be measured."
@@ -476,6 +484,9 @@ async def _slits(ctx: "Context", vertical: float, horizontal: float) -> None:
 
 
 async def _gain(ctx: "Context", s: Setup) -> None:
+    e1, e2, e3 = s.e1, s.e1 + 215.0, s.e2
     await ctx.command(
-        "auto_gain", {"e1": s.e1, "e2": s.e1 + 215.0, "e3": s.e2}, label="Set the amplifier gain"
+        "auto_gain",
+        {"e1": e1, "e2": e2, "e3": e3},
+        label=f"Set the amplifier gain at {e1:.0f}, {e2:.0f} and {e3:.0f} eV",
     )

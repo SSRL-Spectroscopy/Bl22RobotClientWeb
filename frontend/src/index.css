@@ -716,3 +716,151 @@ dialog input {
 .readouts .stale .value {
   color: var(--text-muted);
 }
+
+/* ---- step tree of a sequence ---- */
+
+.step-tree {
+  margin-top: 0.75rem;
+}
+
+.step-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.step-tools strong {
+  margin-right: auto;
+}
+
+.step-tools button {
+  font-size: 0.8rem;
+  padding: 0.15rem 0.5rem;
+}
+
+.step-box {
+  max-height: 28rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.88rem;
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.steps .steps {
+  margin-left: 1.1rem;
+  border-left: 1px solid var(--grid);
+  padding-left: 0.3rem;
+}
+
+.step-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.12rem 0.3rem;
+  border-radius: 4px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+button.step-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+button.step-toggle:hover {
+  background: var(--grid);
+}
+
+.step-caret {
+  flex: none;
+  width: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* lines have no caret: keep their marks in the same column as the sections' */
+.step:not(.step-section) > .step-row {
+  padding-left: 1.55rem;
+}
+
+.step-mark {
+  flex: none;
+  width: 1.1rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.step-number {
+  flex: none;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.step-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-section > .step-row .step-title {
+  font-weight: 600;
+}
+
+.step-time {
+  flex: none;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.step-done > .step-row .step-mark {
+  color: var(--good);
+}
+
+.step-failed > .step-row .step-mark,
+.step-failed > .step-row .step-title {
+  color: var(--critical);
+}
+
+.step-running > .step-row .step-mark {
+  color: var(--running);
+}
+
+/* the line the run is on */
+.step-running:not(.step-section) > .step-row {
+  background: color-mix(in srgb, var(--running) 16%, transparent);
+  outline: 1px solid var(--running);
+  font-weight: 600;
+}
+
+.step-skipped > .step-row .step-title {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.step-planned > .step-row .step-title {
+  color: var(--text-secondary);
+}
+
+.step-empty {
+  margin: 0.1rem 0 0.2rem 2.6rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -164,6 +164,17 @@ The engine is in `backend/src/robotweb/sequence.py`. A sequence is a coroutine t
 
 | Measure the queue | Runs every queued measurement, frame by frame. See below. |
 
+### The step tree
+
+The page shows the steps of a sequence as a numbered tree (`backend/src/robotweb/outline.py`, `frontend/src/StepTree.tsx`): sections such as "Mn K: reference foil Mn, optimise the beamline" hold one line per command, request or report to the portal.
+
+- **Plan.** Before the start the sequence is run once "dry": the same code that will run, but nothing is sent, and the queue, the equipment record and the portal are replaced by stand-ins. What it would go through is the plan, so the plan cannot drift from the run. The plan follows what would be loaded step by step, so it knows for example that the foil of the first edge has to go back before the second.
+- **Run.** The run ticks the planned tree off. Each section and line gets its state (running, done, failed, stopped) and its start and end time; the page shows the elapsed time per line and per section and points at the running line. A section opens by itself while the run is inside it.
+- **Differences.** The plan assumes the expected case: barcodes match, the mono is below 13 keV, the beam stays. Steps the run takes that were not planned are inserted where they happen; planned steps it passes over are shown as not needed.
+- A sequence must reach the outside world only through its `Context`, and must give every request whose answer decides what happens next a `dry=` answer, or its plan will be wrong.
+
+The tree is published under its own state key (`sequence_outline`) and stays on the page after the run, until the next sequence starts.
+
 ### The measurement sequence
 
 Written from `RunFrame_2` in the C# client, in `backend/src/robotweb/measure.py`. Before starting, the page shows the plan: per frame and per element and edge, the reference foil, the detune factor and each measurement with its energy range, sweeps and scan time.

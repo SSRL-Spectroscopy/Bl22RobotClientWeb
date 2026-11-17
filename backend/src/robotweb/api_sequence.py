@@ -28,11 +28,13 @@ async def list_sequences() -> list[dict]:
 
 @router.get("/sequences/{name}/plan")
 async def plan(name: str, request: Request, session: Session = Depends(require_operator)) -> dict:
-    """The steps the sequence would take if started now."""
+    """The steps the sequence would take if started now: as a tree
+    ("outline") and as indented text ("steps")."""
     if name not in SEQUENCES:
         raise HTTPException(404, f"Unknown sequence {name!r}.")
     try:
-        return {"steps": _engine(request).plan(name)}
+        engine = _engine(request)
+        return {"outline": engine.outline(name), "steps": engine.plan(name)}
     except SequenceError as exc:
         raise HTTPException(409, str(exc)) from exc
 

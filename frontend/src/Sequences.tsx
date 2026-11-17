@@ -3,6 +3,8 @@ import { call, post } from './auth'
 import type { Me } from './auth'
 import { formatClock } from './format'
 import type { HelmEntry } from './live'
+import { StepTree } from './StepTree'
+import type { StepNode } from './StepTree'
 
 type SequenceDef = { name: string; label: string; description: string }
 
@@ -88,10 +90,12 @@ function RunLog({ lines }: { lines: LogLine[] }) {
 export function Sequences({ me, state }: { me: Me; state: Record<string, unknown> }) {
   const defs = useSequenceDefs()
   const [selected, setSelected] = useState('')
-  const [plan, setPlan] = useState<string[] | null>(null)
+  const [plan, setPlan] = useState<StepNode[] | null>(null)
   const [error, setError] = useState('')
   const helm = state['helm'] as HelmEntry | undefined
   const sequence = (state['sequence'] as SequenceEntry | undefined) ?? { state: 'idle' }
+  // the step tree of the running or the last sequence
+  const outline = (state['sequence_outline'] as { nodes: StepNode[] } | undefined)?.nodes ?? []
   const iHold = me.user !== null && helm?.holder === me.user
   const active = sequence.state === 'running' || sequence.state === 'paused'
   const status = statusLine(sequence)
@@ -109,8 +113,15 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
   const showPlan = () =>
     run(async () => {
       setPlan(null)
-      const body = (await call('GET', `/api/sequences/${chosen.name}/plan`)) as { steps: string[] }
-      setPlan(body.steps)
+      const body = (await call('GET', `/api/sequences/${chosen.name}/plan`)) as {
+        outline?: StepNode[]
+        steps: string[]
+      }
+      // a backend that has not been restarted yet sends the steps as plain text only
+      const plain = (title: string, id: number): StepNode => ({
+        id, kind: 'line', title, state: 'planned', started: null, finished: null, children: [],
+      })
+      setPlan(body.outline ?? body.steps.map(plain))
     })
 
   const start = () =>
@@ -180,11 +191,7 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
             <p className="hint">{chosen.description}</p>
             {plan && (
               <>
-                <ol className="plan">
-                  {plan.map((step, index) => (
-                    <li key={index}>{step}</li>
-                  ))}
-                </ol>
+                <StepTree nodes={plan} label={`Steps planned: ${chosen.label}`} />
                 <button type="button" className="primary" disabled={!iHold} onClick={start}>
                   Start: {chosen.label}
                 </button>
@@ -199,6 +206,9 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
           <p className="form-error" role="alert">
             {error}
           </p>
+        )}
+        {sequence.state !== 'idle' && (
+          <StepTree nodes={outline} label={active ? 'Steps' : `Steps of the last run: ${sequence.label ?? ''}`} />
         )}
         <RunLog lines={sequence.log ?? []} />
       </div>
