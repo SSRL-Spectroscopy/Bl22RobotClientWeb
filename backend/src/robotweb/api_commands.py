@@ -32,7 +32,7 @@ async def list_commands(request: Request) -> dict:
     runner: CommandRunner = request.app.state.runner
     return {
         "motion_enabled": runner.motion_enabled,
-        "commands": [command.describe() for command in COMMANDS.values()],
+        "commands": [command.describe() for command in COMMANDS.values() if command.manual],
         "queries": [query.describe() for query in QUERIES.values()],
     }
 

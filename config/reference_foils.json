@@ -1,0 +1,16 @@
+{
+  "_about": "Which reference foil calibrates the mono for a measurement. Key: the element being measured. The entry 'default' applies to every edge of that element that is not listed separately. Value: '<foil element> <foil edge>'. Edges are written K, L1, L2, L3. An element that is not listed uses its own foil at the measured edge. Read when the backend starts.",
+  "Ba": { "default": "V K", "L1": "Cr K" },
+  "Bi": { "default": "Pt L3" },
+  "Ce": { "default": "Cr K" },
+  "Dy": { "default": "Co K", "L1": "Cu K", "L2": "Cu K" },
+  "Ga": { "default": "W L3" },
+  "Gd": { "default": "Fe K", "L1": "Ni K", "L2": "Co K" },
+  "Ir": { "default": "Pt L3" },
+  "La": { "default": "Cr K" },
+  "Nd": { "default": "Mn K", "L1": "Fe K", "L2": "Mn K" },
+  "Pr": { "default": "Cr K", "L1": "Fe K", "L2": "Mn K" },
+  "Sm": { "default": "Fe K" },
+  "Sr": { "default": "Zr K" },
+  "Yb": { "default": "Cu K", "L1": "W L3", "L2": "Ta L3" }
+}

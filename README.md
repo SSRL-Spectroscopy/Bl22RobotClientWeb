@@ -85,7 +85,19 @@ To try commands and sequences without moving anything on the beamline:
 .\.venv\Scripts\python -m robotweb.simulate --busy 10 # each simulated process takes 10 s
 ```
 
+**A simulated measurement run writes to the portal in `backend/.env`:** frames are reported scheduled, loaded and returned, and measurements are set to `done` although no data is uploaded. Use it with the dev portal only.
+
 The control server is simulated and hardware commands are switched on. The portal is the one in `backend/.env`; the simulated storage is filled from its slot list, so queued frames are found where the portal says, with the right barcodes. Accounts are copied from `data/` on the first start; the equipment record, queue and logs live in `data-sim/`. EPICS is off, so the plot is empty. The page shows a "Simulation" banner. It can run next to the real backend.
+
+### Science files
+
+`config/` holds the edge and fluorescence tables and two mappings that can be edited: `reference_foils.json` (which reference foil calibrates the mono for an element and edge) and `fy_filters.json` (which filter goes in front of the PIPS detector). They are read when the backend starts, and a mistake in one of them stops the start with a message naming the file. `config/motor_rules/` holds the motor interlock rules; keep it the same as the control server's copy.
+
+### The measurement sequence
+
+"Measure the queue" runs every queued measurement and reports progress to the portal; the steps are described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). It needs the crystal values (the "Monochromator crystal" panel: Reload reads the two PVs, Apply writes them). It waits while the SPEAR current is below 400 mA and goes on 10 minutes after it is above 480 mA.
+
+To have the operators e-mailed when a run stops, waits for beam or goes on again, add their addresses to `backend/.env`, comma separated: `ROBOTWEB_OPERATOR_EMAILS=first@example.org,second@example.org`. The control server sends the messages.
 
 ## Frontend
 

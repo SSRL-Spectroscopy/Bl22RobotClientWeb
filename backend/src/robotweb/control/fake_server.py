@@ -20,13 +20,27 @@ START_COMMANDS: dict[tuple[str, str], str] = {
     ("SAMPLE", "GET_FRAME"): "GetFrame",
     ("SAMPLE", "RETURN_FRAME"): "ReturnFrame",
     ("SAMPLE", "PLACE"): "MoveSampleToBeam",
+    ("SAMPLE", "CALIBRATE_FRAME"): "CalibrateFrame",
     ("SAMPLE", "GET_REF"): "GetReference",
     ("SAMPLE", "RETURN_REF"): "ReturnReference",
     ("SAMPLE", "GET_FILTER"): "GetFilter",
     ("SAMPLE", "RETURN_FILTER"): "ReturnFilter",
     ("BEAMLINE", "MOVE_MONO"): "MoveMono",
+    ("BEAMLINE", "AUTO_GAS_FILL"): "AutoGasFill",
+    ("BEAMLINE", "SET_SLIT_GAP"): "SetSlitGap",
+    ("BEAMLINE", "AUTO_DETUNE"): "AutoDetune",
+    ("BEAMLINE", "ALIGN_TABLE"): "AlignTable",
+    ("BEAMLINE", "AUTO_GAIN"): "AutoGain",
+    ("BEAMLINE", "COLLECT_OFFSETS"): "CollectOffsets",
+    ("SCAN", "CALIBRATE_ENERGY"): "CalibrateEnergy",
     ("SCAN", "START_XAS_SCAN"): "XasScan",
+    ("SCAN", "START_XAS_FY_SCAN"): "XasFyScan",
 }
+
+# Where the robot's first two joints and BOT_VERT are while it holds a frame
+# in the beam, and while it is parked. BOT_VERT moves with the robot.
+_HOLDING = (-60.0, 30.0, 215.0)
+_PARKED = (90.0, 25.74494, 209.0)
 
 
 @dataclass
@@ -41,6 +55,8 @@ class FakeControlServer:
     host: str = "127.0.0.1"
     port: int = 0  # 0 = let the OS pick a free port
     busy_s: float = 0.3  # how long a start command keeps its subsystem busy
+    # (subsystem, verb) -> seconds, for start commands that take longer or shorter.
+    slow: dict = field(default_factory=dict)
     # Send the response in two pieces with a pause, to exercise the reader.
     split_delay_s: float = 0.0
     mono_energy: float = 5966.002295
@@ -73,6 +89,7 @@ class FakeControlServer:
         ]
     )
     requests: list[str] = field(default_factory=list)
+    scans: int = 0
     _subsystems: dict[str, _Subsystem] = field(default_factory=dict)
     _server: asyncio.Server | None = None
     _writers: set = field(default_factory=set)
@@ -146,6 +163,9 @@ class FakeControlServer:
                 return [f"ERROR: FakeServer.MOTOR unknown motor {args[0]}"]
             return [head, f"{self.positions[args[0]]:.6f}"]
 
+        if (subsystem, verb) in (("SCHEDULER", "GET_PHOTO"), ("SCHEDULER", "SEND_MESSAGE")):
+            return [head]
+
         if (subsystem, verb) == ("SCHEDULER", "GET_BARCODE"):
             return [head, self.barcodes.get(self.held, "000-000")]
 
@@ -164,11 +184,28 @@ class FakeControlServer:
                 return [f"ERROR: FakeServer.{subsystem} busy with {sub.state}"]
             if verb == "GET_FRAME" and len(args) == 2:
                 self.held = (int(args[0]), int(args[1]))
+                self.joints[0], self.joints[1], self.positions["BOT_VERT"] = _HOLDING
             elif verb == "RETURN_FRAME":
                 self.held = None
+                self.joints[0], self.joints[1], self.positions["BOT_VERT"] = _PARKED
+            elif (subsystem, verb) == ("MOTOR", "MOVE") and len(args) == 2:
+                if args[0] not in self.positions:
+                    return [f"ERROR: FakeServer.MOTOR unknown motor {args[0]}"]
+                self.positions[args[0]] = float(args[1])
+            elif (subsystem, verb) == ("BEAMLINE", "MOVE_MONO") and len(args) == 1:
+                self.mono_energy = float(args[0])
             sub.state = START_COMMANDS[(subsystem, verb)]
-            sub.task = asyncio.get_running_loop().create_task(self._finish(sub))
+            sub.task = asyncio.get_running_loop().create_task(
+                self._finish(sub, self.slow.get((subsystem, verb), self.busy_s))
+            )
+            if verb in ("START_XAS_SCAN", "START_XAS_FY_SCAN") and args:
+                self.scans += 1
+                return [head, f"{args[0]}_{self.scans:03d}"]  # the name of the scan's data
             return [head]
+
+        if (subsystem, verb) in (("SCAN", "POST_XAS_SCAN"), ("SCAN", "POST_XAS_FY_SCAN")):
+            return [head]
+
 
         if (subsystem, verb) == ("SCAN", "GET_MONO_ENERGY"):
             return [head, f"{self.mono_energy:.6f}"]
@@ -181,8 +218,8 @@ class FakeControlServer:
 
         return [f"ERROR: FakeServer.EvaluateRequest unknown command {subsystem} {verb} {' '.join(args)}".rstrip()]
 
-    async def _finish(self, sub: _Subsystem) -> None:
-        await asyncio.sleep(self.busy_s)
+    async def _finish(self, sub: _Subsystem, busy_s: float) -> None:
+        await asyncio.sleep(busy_s)
         sub.state = "IDLE"
 
 

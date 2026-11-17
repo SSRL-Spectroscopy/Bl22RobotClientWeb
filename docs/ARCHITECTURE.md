@@ -119,7 +119,7 @@ One command runs at a time, and only while its subsystem is idle. Commands that 
 
 There is only one robot. It moves frames, reference foils and FY filters, and it also holds the frame in the beam during a measurement. While it holds a frame it cannot move anything else. That is why the frame always goes back to storage before a reference or a filter is fetched or returned, and why those commands require "no frame on the beam" (confirmed 2026-11-16). After the exchange the robot is free to fetch the frame again.
 
-Not implemented yet: motor moves, `SAMPLE PLACE`, `SAMPLE CALIBRATE_FRAME`, slits, mono and the other `BEAMLINE` and `SCAN` processes.
+Motor moves, `SAMPLE PLACE`, `SAMPLE CALIBRATE_FRAME` and the `BEAMLINE` and `SCAN` processes (gas fill, slits, detune, table alignment, gain, offsets, mono move, energy calibration, the two XAS scans) are defined in the same file as commands that only sequences may send. They are not offered on the page and are refused when sent by hand.
 
 ### Motors
 
@@ -128,7 +128,7 @@ Not implemented yet: motor moves, `SAMPLE PLACE`, `SAMPLE CALIBRATE_FRAME`, slit
 - Any logged-in operator can read all motor positions and the joints from the page; the result is shown to everyone.
 - `config/motor_rules/*.json` holds a copy of the control server's interlock rules: for a motor to move within a given range, other motors (and the robot joints `JOINT_1`, `JOINT_2`) must be within given ranges. For example, `DET_Y` may only move if `DET_X` is at 170 to 230, `PIPS_VERT` and `SOL_VERT` are below 30, `BOT_VERT` is above 210 and the robot is away. The control server enforces these, but may have bugs, so the backend checks them as well (`backend/src/robotweb/motor_rules.py`).
 - A rule applies when the motor's position and the target are inside the rule's ranges and the move goes in the rule's `direction` (-1 negative, 0 any, 1 positive). Every condition of every applicable rule must hold. If no rule covers the motor's position and the target at all, whatever the direction, the backend refuses the move with "current position or target outside of defined rules"; this catches readings just outside a range, such as -0.001. A move that is covered only by rules for the other direction is allowed, for example lowering `PIPS_VERT` (both decided 2026-11-17). `OPTIC_VERT`, `REF_PIVOT` and `SOL_HOR` have no conditions; their files only declare the travel range.
-- The rule check is written and tested against the rule files, but not yet connected to any command, because no motor command is implemented yet. The copy in `config/motor_rules` must be kept the same as the control server's files.
+- Every `MOTOR MOVE` the backend sends goes through the rule check first: the positions the motor's rules need are read, and the move is refused if a rule is not met. The copy in `config/motor_rules` must be kept the same as the control server's files.
 
 ## The portal (BL22 REST API)
 
@@ -162,13 +162,69 @@ The engine is in `backend/src/robotweb/sequence.py`. A sequence is a coroutine t
 | Verify the queued frames | For each queued frame: get it, read its barcode (`SCHEDULER GET_BARCODE`), compare with the portal's barcode for that slot, return it. A mismatch is marked on the queue entry. |
 | Clean up | Returns the frame, then the reference foil, then the FY filter, as far as they are loaded. Needs all three to be known. Started only by an operator. |
 
-The measurement sequence itself (the `RunFrame_2` logic) is not written yet.
+| Measure the queue | Runs every queued measurement, frame by frame. See below. |
+
+### The measurement sequence
+
+Written from `RunFrame_2` in the C# client, in `backend/src/robotweb/measure.py`. Before starting, the page shows the plan: per frame and per element and edge, the reference foil, the detune factor and each measurement with its energy range, sweeps and scan time.
+
+1. Every queued frame is reported to the portal as `scheduled`. `OPTIC_VERT` moves to the pipe position.
+2. Per frame: get it (portal: `loaded`), read its barcode. A frame with the wrong barcode is returned and skipped.
+3. The frame's measurements run grouped by element and edge (lowest edge energy first), within that by detection (transmission, TFY, SDD), then by beam (unfocused, focused).
+4. For a new element or edge: the frame goes back to its slot while the robot exchanges the reference foil (and the FY filter); then the ion chambers are filled, the mono is detuned, the slits set, the table aligned, the gain set and the mono calibrated on the foil. The foil stays loaded for the next frame if that frame needs the same one, but the beamline is optimised at least once for every frame, against drift.
+5. Once per frame the frame is aligned in the beam (at 10 keV if the mono is above 13 keV).
+6. Per measurement: place the sample, raise the Soller slits and PIPS for TFY, take the photo, set slits and gain, collect offsets, drive the SDD in if needed, scan, and have the control server upload each sweep (`SCAN POST_XAS_SCAN` or `POST_XAS_FY_SCAN`).
+7. The measurement is then reported `done` to the portal, in a step of its own, before the SDD moves back. A later version may evaluate the data in that step and run more sweeps.
+8. When a frame is finished it is returned (portal: `internal_storage`). When the queue is finished the foil and the filter are returned.
+
+Decisions (2026-11-17):
+
+- A measurement that is already `done` or `error` in the portal can be queued. It is set back to `pending` just before its scan, so the upload starts a new batch.
+- Any failure stops the whole run and leaves everything in place. Frames that were scheduled but never taken out of storage are released in the portal (`internal_storage`); the frame on the robot stays `loaded` until the cleanup sequence has returned it. The cleanup sequence first retracts and parks the SDD detector if it is not parked.
+- No scan-info file is produced here: scan metadata belongs to the data upload, which is the control software's job. The "frame complete" e-mail comes from the portal. E-mails to the operators are described below.
+- `BOT_VERT` moves with the robot: when the robot holds a frame in the beam, `BOT_VERT` is already in the range the detector rules need.
+- `SAMPLE PLACE` takes `<plate> <side> <number> <fy>`, for example `8-CIRCLE LEFT 1 TRUE` (from `ParseApiSamplePosition_2`): sample A is 1, H is 8, and `<fy>` is `TRUE` for TFY and SDD detection. Only the plate types `8-circle` and `8-slot` are defined. A queue with a sample on another plate type (`8-circle-gas`) is refused before anything moves.
+
+### Waiting for beam
+
+`backend/src/robotweb/beam.py` watches the SPEAR current (`SPEAR:BeamCurrAvg`, already monitored for the status page). Decided 2026-11-17:
+
+- Below 400 mA the beam counts as lost. The measurement sequence then waits before its next command; a command that is running finishes first.
+- The run goes on once the current has stayed above 480 mA for 10 minutes. A reading at or below 480 mA in that time starts the 10 minutes again.
+- If the current cannot be read for 60 s, that counts as lost beam as well.
+- While waiting, the sequence stays "running" and the page shows why it waits. Abort works at once. Pause works too; while paused, commands can be sent by hand.
+- A scan during which the beam was lost is not uploaded. After the beam is back the beamline is optimised again and the scan is repeated in full.
+- A command that fails because the beam is gone (for example the gain or the energy calibration) still stops the run like any other failure.
+- Only the measurement sequence waits for beam; the verify and cleanup sequences do not need X-rays.
+
+The limits are settings: `ROBOTWEB_BEAM_LOW_MA`, `ROBOTWEB_BEAM_OK_MA`, `ROBOTWEB_BEAM_SETTLE_S`, `ROBOTWEB_BEAM_PV`. With EPICS off (tests, simulator) there is no beam watch.
+
+### E-mails to the operators
+
+The control server sends them (`SCHEDULER SEND_MESSAGE <address> <subject> <text>`, as the C# client did); see `backend/src/robotweb/notify.py`. The measurement sequence sends one when it starts waiting for beam, when it goes on again, and when it stops on a failure. The addresses are in `ROBOTWEB_OPERATOR_EMAILS` in `backend/.env`, comma separated. They are not written to the run log. Without addresses nothing is sent and the run log says so. A message that cannot be sent is logged and never stops the run.
+
+### Science rules
+
+`backend/src/robotweb/science.py` works out everything a measurement needs before anything moves. It reads four files in `config/` when the backend starts:
+
+| File | Content |
+|---|---|
+| `xray_edges.csv` | Absorption edge energies (X-Ray Data Booklet) |
+| `xray_fluorescence_lines.csv` | Fluorescence lines per edge, for the SDD regions of interest |
+| `reference_foils.json` | Measured element and edge to reference foil. An element not listed uses its own foil. Edit this file to add elements. |
+| `fy_filters.json` | Measured element to the filter in front of the PIPS detector |
+
+Edges are written as in the portal (`K`, `L1`, `L2`, `L3`) inside the backend and in the JSON files; the tables and the control server use `L-3`. The detune factor keeps the 0.45 cap at low energy, which the C# code overwrote. Eight sweeps per measurement.
+
+### Monochromator crystal
+
+Two PVs hold the crystal: `BL22:STORE:CRYSTAL_D` (lattice spacing in angstrom; about 3.13 is Si-111, about 1.92 is Si-220) and `BL22:STORE:CRYSTAL_PHI` (0 or 90 degrees). They are not monitored, because the crystal is changed by hand and rarely. The backend reads them at start and when an operator presses Reload, and writes them when the operator at the helm presses Apply (`backend/src/robotweb/crystal.py`). Sequences use the values last read; the measurement sequence refuses to start if they are unknown. With EPICS off (tests, simulator) the values are held in memory.
 
 Division of work with the control server: the control server uploads the measured sweeps to the portal itself, because it knows how to retrieve the data after a scan. The web backend only reads the queue and reports frame state and measurement status.
 
 ### Simulation
 
-`python -m robotweb.simulate` runs the whole backend against a simulated control server on port 8601, with hardware commands switched on. Nothing on the beamline moves. The simulated storage is filled from the portal's slot list, so queued frames are found in their slots with the right barcodes. Accounts, the equipment record, the queue and the logs are kept separately in `data-sim/`. EPICS is off. The page shows a "Simulation" banner. The real and the simulated backend can run side by side.
+`python -m robotweb.simulate` runs the whole backend against a simulated control server on port 8601, with hardware commands switched on. Nothing on the beamline moves. The simulated storage is filled from the portal's slot list, so queued frames are found in their slots with the right barcodes. Accounts, the equipment record, the queue and the logs are kept separately in `data-sim/`. EPICS is off, so the crystal values are held in memory. The page shows a "Simulation" banner. The portal is real: a simulated measurement run reports frame states and sets measurements to `done` in the configured portal without any data being uploaded, so point the simulator at the dev portal only. The real and the simulated backend can run side by side.
 
 ## Open items
 

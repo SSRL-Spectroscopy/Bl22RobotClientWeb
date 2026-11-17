@@ -22,6 +22,7 @@ from .commands import COMMANDS, QUERIES, Command, CommandRefused, slot_is_occupi
 from .control.client import ControlClient, ControlConnectionError
 from .control.protocol import ProtocolError, SubsystemStatus, parse_status
 from .equipment import ITEMS, EquipmentState
+from .motor_rules import MotorRules
 from .state import StateStore
 
 log = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class CommandRunner:
         audit: AuditLog,
         *,
         motion_enabled: bool,
+        rules: MotorRules | None = None,
         settle_s: float = 0.1,
         poll_s: float = 0.5,
         max_poll_failures: int = 10,
@@ -55,6 +57,7 @@ class CommandRunner:
         self._equipment = equipment
         self._audit = audit
         self.motion_enabled = motion_enabled
+        self._rules = rules
         self._settle_s = settle_s
         self._poll_s = poll_s
         self._max_poll_failures = max_poll_failures
@@ -76,8 +79,10 @@ class CommandRunner:
 
     # ---- commands -----------------------------------------------------------
 
-    async def run(self, name: str, raw_args: dict, *, user: str) -> None:
+    async def run(self, name: str, raw_args: dict, *, user: str) -> list[str]:
         """Start a command for a sequence and wait until it has finished.
+        Returns the data lines the control server sent when it accepted the
+        command (a scan answers with the name of its data).
 
         Raises CommandRefused if it could not be started and CommandFailed if
         it started but did not succeed.
@@ -88,6 +93,7 @@ class CommandRunner:
         await asyncio.shield(task)
         if record["phase"] != "succeeded":
             raise CommandFailed(f"{record['label']} failed: {record['detail']}")
+        return record["answer"]
 
     async def ask(self, text: str) -> list[str]:
         """Send a read-only request for a sequence and return its data lines."""
@@ -123,6 +129,8 @@ class CommandRunner:
         spec = COMMANDS.get(name)
         if spec is None:
             raise CommandRefused(f"unknown command {name!r}")
+        if not spec.manual and not by_sequence:
+            raise CommandRefused(f"{spec.label} can only be sent by a sequence.")
         if self.sequence_running and not by_sequence:
             raise CommandRefused("A sequence is running. Pause it before sending commands by hand.")
         if not self.motion_enabled:
@@ -143,6 +151,7 @@ class CommandRunner:
             "text": None,
             "step": None,
             "detail": None,
+            "answer": [],
             "started": time.time(),
             "finished": None,
         }
@@ -159,6 +168,8 @@ class CommandRunner:
                         f"Container {args['container']}, slot {args['slot']} is empty "
                         "according to the control server."
                     )
+            if spec.motor_move:
+                await self._check_motor_rules(args["motor"], args["position"])
             text = spec.build(self._equipment, args)
             results = spec.result(self._equipment, args)
         except BaseException:
@@ -183,9 +194,24 @@ class CommandRunner:
             raise CommandRefused(f"The control server refused the command: {response.error}")
 
         record["phase"] = "running"
+        record["answer"] = list(response.lines)
         self._audit.write("command_started", user=user, command=spec.name, text=text)
         self._publish(record)
         self._task = asyncio.create_task(self._watch(spec, record, results), name=f"command-{spec.name}")
+
+    async def _check_motor_rules(self, motor: str, target: float) -> None:
+        """The backend's own check of the interlock rules (motor_rules.py),
+        against positions read now. Raises CommandRefused if the move is not
+        allowed or cannot be judged."""
+        if self._rules is None:
+            raise CommandRefused("The motor rules are not loaded, so no motor can be moved.")
+        try:
+            positions = await self.read_positions(self._rules.needed_for(motor))
+        except CommandFailed as exc:
+            raise CommandRefused(f"{motor} was not moved: {exc}") from exc
+        problems = self._rules.check_move(motor, target, positions)
+        if problems:
+            raise CommandRefused(f"{motor} may not move to {target:g}: " + "; ".join(problems) + ".")
 
     async def _watch(self, spec: Command, record: dict, results: dict) -> None:
         """Poll the subsystem until the process ends, then record the outcome."""

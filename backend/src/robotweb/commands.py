@@ -14,10 +14,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .equipment import FILTER, FRAME, REFERENCE, EquipmentState
+from .science import num
 
 CONTAINERS = 3
 SLOTS_PER_CONTAINER = 12
 _NAME = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
+_WORDS_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+( [A-Za-z0-9_.-]+){0,15}$")
 
 
 class CommandRefused(Exception):
@@ -28,11 +30,21 @@ class CommandRefused(Exception):
 class Param:
     name: str
     label: str
-    kind: str  # "int" or "name"
-    min: int | None = None
-    max: int | None = None
+    kind: str  # "int", "number", "name" or "words"
+    min: float | None = None
+    max: float | None = None
 
     def clean(self, raw: Any) -> Any:
+        if self.kind == "number":
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw != raw or abs(raw) == float("inf"):
+                raise CommandRefused(f"{self.label} must be a number")
+            if (self.min is not None and raw < self.min) or (self.max is not None and raw > self.max):
+                raise CommandRefused(f"{self.label} must be between {self.min} and {self.max}")
+            return float(raw)
+        if self.kind == "words":
+            if not isinstance(raw, str) or not _WORDS_PATTERN.fullmatch(raw):
+                raise CommandRefused(f"{self.label}: up to 16 words from A-Z a-z 0-9 _ . -")
+            return raw
         if self.kind == "int":
             if isinstance(raw, bool) or not isinstance(raw, int):
                 raise CommandRefused(f"{self.label} must be a whole number")
@@ -66,6 +78,12 @@ class Command:
     # The command takes a frame out of storage: the slot named by the
     # "container" and "slot" parameters must be occupied.
     needs_occupied_slot: bool = False
+    # False for commands that only sequences send: they are not offered on
+    # the page and are refused when sent by hand.
+    manual: bool = True
+    # The command moves the motor named by the "motor" parameter to
+    # "position": the motor interlock rules are checked first.
+    motor_move: bool = False
 
     def clean_args(self, raw: dict) -> dict:
         unexpected = set(raw) - {p.name for p in self.params}
@@ -177,6 +195,97 @@ def _check_return_filter(eq: EquipmentState, args: dict) -> None:
     _need_loaded(eq, FILTER, "There is no FY filter to return.")
 
 
+# ---- commands that only sequences send -------------------------------------------
+
+
+def _nothing(eq: EquipmentState, args: dict) -> None:
+    return None
+
+
+def _check_frame_held(eq: EquipmentState, args: dict) -> None:
+    _need_loaded(eq, FRAME, "The robot is not holding a frame.")
+
+
+def _step(name: str, label: str, subsystem: str, text: str, *params: Param, **more) -> Command:
+    """A process that changes none of the tracked equipment items. `text` is
+    the protocol string with {parameter} placeholders; numbers are written
+    without exponent or trailing zeros."""
+
+    def build(eq: EquipmentState, args: dict) -> str:
+        shown = {k: num(v) if isinstance(v, float) else v for k, v in args.items()}
+        return text.format(**shown)
+
+    fields = dict(check=_nothing, changes=(), result=lambda eq, a: {})
+    fields.update(more)
+    return Command(
+        name=name, label=label, subsystem=subsystem, params=params, build=build,
+        manual=False, group="Sequence steps", **fields,
+    )
+
+
+def _with_frame(name: str, label: str, text: str, *params: Param) -> Command:
+    """A robot process on the frame it holds. If it fails, the backend no
+    longer knows where the frame is."""
+    return _step(
+        name, label, "SAMPLE", text, *params,
+        check=_check_frame_held, changes=(FRAME,), result=lambda eq, a: {FRAME: eq.value(FRAME)},
+    )
+
+
+_ENERGY = dict(min=1000.0, max=40000.0)
+
+_SEQUENCE_STEPS = (
+    _step(
+        "motor_move", "Move motor", "MOTOR", "MOTOR MOVE {motor} {position}",
+        Param("motor", "Motor", "name"), Param("position", "Position", "number", -1000.0, 1000.0),
+        motor_move=True,
+    ),
+    _with_frame("place_sample", "Place sample", "SAMPLE PLACE {where}", Param("where", "Position", "words")),
+    _with_frame("align_frame", "Align frame", "SAMPLE CALIBRATE_FRAME"),
+    _step("gas_fill", "Fill ion chambers", "BEAMLINE", "BEAMLINE AUTO_GAS_FILL {mix}", Param("mix", "Gas mix", "words")),
+    _step(
+        "set_slits", "Set slits", "BEAMLINE", "BEAMLINE SET_SLIT_GAP {vertical} {horizontal}",
+        Param("vertical", "Vertical gap", "number", 0.0, 20.0),
+        Param("horizontal", "Horizontal gap", "number", 0.0, 30.0),
+    ),
+    _step(
+        "detune", "Detune mono", "BEAMLINE", "BEAMLINE AUTO_DETUNE {energy} {factor}",
+        Param("energy", "Energy", "number", **_ENERGY), Param("factor", "Detune factor", "number", 0.0, 1.0),
+    ),
+    _step("align_table", "Align table", "BEAMLINE", "BEAMLINE ALIGN_TABLE"),
+    _step(
+        "auto_gain", "Set amplifier gain", "BEAMLINE", "BEAMLINE AUTO_GAIN {e1} {e2} {e3} 0 1 2 3",
+        Param("e1", "Energy 1", "number", **_ENERGY), Param("e2", "Energy 2", "number", **_ENERGY),
+        Param("e3", "Energy 3", "number", **_ENERGY),
+    ),
+    _step("collect_offsets", "Collect offsets", "BEAMLINE", "BEAMLINE COLLECT_OFFSETS"),
+    _step("move_mono", "Move mono", "BEAMLINE", "BEAMLINE MOVE_MONO {energy}", Param("energy", "Energy", "number", **_ENERGY)),
+    _step(
+        "calibrate_energy", "Calibrate mono", "SCAN", "SCAN CALIBRATE_ENERGY {element} {edge} {crystal}",
+        Param("element", "Foil element", "name"), Param("edge", "Foil edge", "name"),
+        Param("crystal", "Crystal", "name"),
+    ),
+    _step(
+        "xas_scan", "XAS scan", "SCAN", "SCAN START_XAS_SCAN {scan} {e1} {e2} {time} {points} {sweeps}",
+        Param("scan", "Scan name", "name"),
+        Param("e1", "Start energy", "number", **_ENERGY), Param("e2", "End energy", "number", **_ENERGY),
+        Param("time", "Time per sweep", "number", 1.0, 3600.0),
+        Param("points", "Points", "int", 10, 100000), Param("sweeps", "Sweeps", "int", 1, 100),
+    ),
+    _step(
+        "xas_fy_scan", "XAS scan with SDD", "SCAN",
+        "SCAN START_XAS_FY_SCAN {scan} {e1} {e2} {time} {points} {sweeps} "
+        "{roi1_min} {roi1_size} {roi2_min} {roi2_size}",
+        Param("scan", "Scan name", "name"),
+        Param("e1", "Start energy", "number", **_ENERGY), Param("e2", "End energy", "number", **_ENERGY),
+        Param("time", "Time per sweep", "number", 1.0, 3600.0),
+        Param("points", "Points", "int", 10, 100000), Param("sweeps", "Sweeps", "int", 1, 100),
+        Param("roi1_min", "ROI 1 start", "int", 0, 100000), Param("roi1_size", "ROI 1 size", "int", 1, 100000),
+        Param("roi2_min", "ROI 2 start", "int", 0, 100000), Param("roi2_size", "ROI 2 size", "int", 1, 100000),
+    ),
+)
+
+
 COMMANDS: dict[str, Command] = {
     c.name: c
     for c in (
@@ -241,6 +350,7 @@ COMMANDS: dict[str, Command] = {
             changes=(FILTER,),
             result=lambda eq, a: {FILTER: None},
         ),
+        *_SEQUENCE_STEPS,
     )
 }
 

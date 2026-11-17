@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from './auth'
 import { Commands } from './Commands'
+import { Crystal } from './Crystal'
 import { Helm } from './Helm'
 import { useLive } from './live'
 import type { ControlEntry, HelmEntry } from './live'
@@ -65,6 +66,7 @@ function App() {
       <Helm me={me} helm={state['helm'] as HelmEntry | undefined} />
       <Subsystems state={state} />
       <Sequences me={me} state={state} />
+      <Crystal me={me} state={state} />
       <Samples me={me} state={state} />
       <Commands me={me} state={state} />
       <RollingPlot pvs={plotted} />

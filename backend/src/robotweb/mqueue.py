@@ -125,6 +125,18 @@ class MeasurementQueue:
                 self._save()
                 return
 
+    def mark_measurement(self, barcode: str, measurement_id: str, state: str) -> None:
+        """Record how far a sequence got with one queued measurement:
+        queued, running, uploaded, done or failed."""
+        for item in self._items:
+            if item["barcode"] != barcode:
+                continue
+            for measurement in item["measurements"]:
+                if measurement["id"] == measurement_id:
+                    measurement["state"] = state
+                    self._save()
+                    return
+
     def clear(self, *, user: str) -> None:
         self._items = []
         self._audit.write("queue_cleared", user=user)

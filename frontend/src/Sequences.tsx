@@ -14,6 +14,7 @@ type SequenceEntry = {
   user?: string
   step?: string | null
   detail?: string | null
+  waiting?: string | null
   started?: number
   finished?: number | null
   pause_requested?: boolean
@@ -49,6 +50,7 @@ function statusLine(sequence: SequenceEntry): { icon: string; kind: string; text
     case 'running':
       if (sequence.abort_requested) return { icon: '▶', kind: 'running', text: `${name}: stopping after the current command` }
       if (sequence.pause_requested) return { icon: '▶', kind: 'running', text: `${name}: pausing after the current command` }
+      if (sequence.waiting) return { icon: '❚❚', kind: 'paused', text: `${name}: waiting for beam` }
       return { icon: '▶', kind: 'running', text: `${name}: running` }
     case 'paused':
       return { icon: '❚❚', kind: 'paused', text: `${name}: paused` }
@@ -127,7 +129,8 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
           </span>
           <strong>{status.text}</strong>
           {sequence.user && <> · started by {sequence.user}</>}
-          {active && sequence.step && <span className="command-detail">Step: {sequence.step}</span>}
+          {active && sequence.waiting && <span className="command-detail">{sequence.waiting}</span>}
+          {active && !sequence.waiting && sequence.step && <span className="command-detail">Step: {sequence.step}</span>}
           {!active && sequence.detail && <span className="command-detail">{sequence.detail}</span>}
         </p>
 

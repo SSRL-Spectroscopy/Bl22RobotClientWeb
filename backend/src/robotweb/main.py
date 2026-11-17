@@ -15,6 +15,11 @@ from fastapi.staticfiles import StaticFiles
 from .api_auth import COOKIE_NAME, Presence
 from .api_auth import router as auth_router
 from .api_commands import router as commands_router
+from .api_crystal import router as crystal_router
+from .beam import BeamWatch, pv_reader
+from .crystal import ChannelAccess, Crystal, CrystalError, Memory
+from .notify import Notifier, parse_addresses
+from .science import Science
 from .api_samples import router as samples_router
 from .api_sequence import router as sequence_router
 from .sequence import SequenceEngine
@@ -62,6 +67,10 @@ async def lifespan(app: FastAPI):
     audit.write("backend_started")
 
     equipment = EquipmentState(settings.equipment_file, store, audit)
+    # A broken rule or table file stops the backend from starting: better
+    # than running without the check.
+    app.state.motor_rules = MotorRules.load(settings.motor_rules_dir)
+    app.state.science = Science(settings.science_dir)
     runner = CommandRunner(
         ControlClient(
             settings.control_host,
@@ -74,17 +83,46 @@ async def lifespan(app: FastAPI):
         equipment,
         audit,
         motion_enabled=settings.motion_commands_enabled,
+        rules=app.state.motor_rules,
     )
     app.state.equipment = equipment
     app.state.runner = runner
-    # A broken rule file stops the backend from starting: better than
-    # running without the check.
-    app.state.motor_rules = MotorRules.load(settings.motor_rules_dir)
+    crystal = Crystal(
+        ChannelAccess() if settings.epics_enabled else Memory(),
+        store,
+        audit,
+        simulated=not settings.epics_enabled,
+    )
+    app.state.crystal = crystal
 
     portal = PortalClient(settings.bl22_api_url, settings.bl22_api_key)
     app.state.portal = portal
     app.state.queue = MeasurementQueue(settings.queue_file, store, audit)
-    sequences = SequenceEngine(runner, equipment, app.state.queue, store, audit, settings.data_dir / "runs")
+    # Without EPICS (tests, simulator) there is no SPEAR current to watch.
+    beam = None
+    if settings.epics_enabled:
+        beam = BeamWatch(
+            pv_reader(store, f"pv.{settings.beam_pv}"),
+            store,
+            low_ma=settings.beam_low_ma,
+            ok_ma=settings.beam_ok_ma,
+            settle_s=settings.beam_settle_s,
+        )
+    app.state.beam = beam
+    sequences = SequenceEngine(
+        runner,
+        equipment,
+        app.state.queue,
+        store,
+        audit,
+        settings.data_dir / "runs",
+        portal=portal,
+        science=app.state.science,
+        crystal=crystal,
+        simulation=settings.simulation,
+        beam=beam,
+        notifier=Notifier(runner, parse_addresses(settings.operator_emails)),
+    )
     app.state.sequences = sequences
 
     async def helm_clock() -> None:
@@ -92,10 +130,18 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(1.0)
             helm.tick(lambda user: presence.has_page(user) and sessions.user_has_session(user))
 
+    async def read_crystal() -> None:
+        # In the background: an unreachable IOC must not delay the start.
+        with contextlib.suppress(CrystalError):
+            await crystal.reload()
+
     tasks = [
+        asyncio.create_task(read_crystal(), name="crystal-read"),
         asyncio.create_task(store.run(), name="state-flush"),
         asyncio.create_task(helm_clock(), name="helm-clock"),
     ]
+    if beam is not None:
+        tasks.append(asyncio.create_task(beam.run(), name="beam-watch"))
 
     if settings.status_poll_enabled:
         poller = StatusPoller(
@@ -135,6 +181,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="RobotClientWeb", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(commands_router)
+app.include_router(crystal_router)
 app.include_router(samples_router)
 app.include_router(sequence_router)
 

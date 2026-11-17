@@ -166,7 +166,10 @@ async def test_abort_leaves_everything_in_place_and_cleanup_is_separate(rig):
     await asyncio.sleep(0.15)
     assert rig.sent() == ["SAMPLE GET_FRAME 0 9"]  # no automatic cleanup
 
-    assert rig.engine.plan("cleanup") == ["Return the frame to container 0, slot 9"]
+    assert rig.engine.plan("cleanup") == [
+        "Retract and park the SDD detector, if it is not parked",
+        "Return the frame to container 0, slot 9",
+    ]
     rig.engine.start("cleanup", user="alice")
     assert (await rig.until("finished", "failed"))["state"] == "finished"
     assert rig.sent()[-1] == "SAMPLE RETURN_FRAME 0 9"
@@ -213,13 +216,21 @@ async def test_cleanup_returns_frame_first_then_reference_and_filter(rig):
     rig.equipment.set_known(FILTER, "Z-1")
     rig.equipment.set_known(FRAME, {"container": 0, "slot": 9})
     assert rig.engine.plan("cleanup") == [
+        "Retract and park the SDD detector, if it is not parked",
         "Return the frame to container 0, slot 9",
         "Return the reference foil Co",
         "Return the FY filter Z-1",
     ]
     rig.engine.start("cleanup", user="alice")
     assert (await rig.until("finished", "failed"))["state"] == "finished"
-    assert rig.sent() == ["SAMPLE RETURN_FRAME 0 9", "SAMPLE RETURN_REF Co", "SAMPLE RETURN_FILTER"]
+    # the detector is parked already, so its positions are read and nothing moves
+    assert rig.sent() == [
+        "MOTOR GET_POSITION DET_X",
+        "MOTOR GET_POSITION DET_Y",
+        "SAMPLE RETURN_FRAME 0 9",
+        "SAMPLE RETURN_REF Co",
+        "SAMPLE RETURN_FILTER",
+    ]
 
 
 async def test_when_a_sequence_cannot_start(rig):

@@ -498,6 +498,10 @@ dialog input {
   overflow-x: auto;
 }
 
+.crystal-now {
+  margin: 0 0 0.5rem;
+}
+
 .select-bar {
   display: flex;
   flex-wrap: wrap;

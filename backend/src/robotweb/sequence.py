@@ -25,13 +25,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from . import measure
 from .audit import AuditLog
 from .commands import CommandRefused
 from .control.client import ControlConnectionError
 from .control.protocol import ProtocolError
 from .equipment import FILTER, FRAME, ITEMS, REFERENCE, EquipmentState
 from .mqueue import MeasurementQueue
+from .portal import PortalError
 from .runner import CommandFailed, CommandRunner
+from .science import ScienceError
 from .state import StateStore
 
 log = logging.getLogger(__name__)
@@ -57,21 +60,45 @@ class Context:
         self.user = user
         self.queue = engine.queue
         self.equipment = engine.equipment
+        self.portal = engine.portal
+        self.science = engine.science
+        self.crystal = engine.crystal
+        self.simulation = engine.simulation
+        # Set by a sequence that needs X-rays: every checkpoint then also
+        # waits while the beam is lost (beam.py).
+        self.needs_beam = False
+
+    @property
+    def beam_losses(self) -> int:
+        """How often the beam has been lost so far (0 without a beam watch)."""
+        return self._engine.beam.losses if self._engine.beam is not None else 0
+
+    async def notify(self, subject: str, text: str) -> None:
+        """E-mail the operators. Never raises: a message that cannot be sent
+        is written to the run log."""
+        await self._engine._notify(subject, text)
 
     def log(self, text: str, level: str = "info") -> None:
         self._engine._log(text, level)
 
     async def checkpoint(self) -> None:
-        """Honour a pause or abort request. Called before every command."""
+        """Honour a pause or abort request, and wait for beam if the
+        sequence needs it. Called before every command."""
         await self._engine._checkpoint()
+        if self.needs_beam:
+            await self._engine._wait_for_beam()
 
-    async def command(self, name: str, args: dict | None = None, *, label: str) -> None:
+    async def command(self, name: str, args: dict | None = None, *, label: str) -> list[str]:
         """Run one of the commands in commands.py and wait for it to finish.
-        The command's own preconditions and equipment updates apply."""
+        The command's own preconditions and equipment updates apply. Returns
+        the data lines of the control server's first answer."""
         await self.checkpoint()
         self._engine._set_step(label)
         self.log(label)
-        await self._engine.runner.run(name, args or {}, user=self.user)
+        return await self._engine.runner.run(name, args or {}, user=self.user)
+
+    async def read_positions(self, names: list[str]) -> dict[str, float]:
+        return await self._engine.runner.read_positions(names)
 
     async def ask(self, text: str, *, label: str) -> list[str]:
         """Send a read-only request and return its data lines."""
@@ -154,6 +181,7 @@ def _cleanup_steps(equipment: EquipmentState) -> list[tuple[str, str]]:
     steps = []
     frame = equipment.value(FRAME)
     if frame is not None:
+        steps.append(("park_detector", "Retract and park the SDD detector, if it is not parked"))
         steps.append(("return_frame", f"Return the frame to container {frame['container']}, slot {frame['slot']}"))
     if equipment.value(REFERENCE) is not None:
         steps.append(("return_reference", f"Return the reference foil {equipment.value(REFERENCE)}"))
@@ -171,7 +199,54 @@ def _plan_cleanup(engine: "SequenceEngine") -> list[str]:
 
 async def _run_cleanup(ctx: Context) -> None:
     for command, label in _cleanup_steps(ctx.equipment):
+        if command == "park_detector":
+            await _park_detector(ctx)
+            continue
         await ctx.command(command, label=label)
+        if command == "return_frame":
+            await _report_frames_returned(ctx)
+
+
+async def _park_detector(ctx: Context) -> None:
+    """After a run that stopped during an SDD measurement the detector is
+    still in front of the sample. It can only move while the robot holds the
+    frame in the beam (motor rules), so it is parked before the frame goes."""
+    positions = await ctx.read_positions(["DET_X", "DET_Y"])
+    if positions["DET_Y"] < 128.0:
+        await ctx.command(
+            "motor_move", {"motor": "DET_Y", "position": 130.0}, label="Retract the detector: move DET_Y to 130"
+        )
+    if positions["DET_X"] > 10.0:
+        await ctx.command(
+            "motor_move", {"motor": "DET_X", "position": 0.0}, label="Park the detector: move DET_X to 0"
+        )
+
+
+async def _report_frames_returned(ctx: Context) -> None:
+    """A frame a stopped run left "loaded" is back in its slot now: tell the
+    portal. A portal problem is logged and does not stop the cleanup."""
+    if ctx.portal is None:
+        return
+    for item in ctx.queue.items:
+        if item["state"] != "loaded":
+            continue
+        barcode = item["barcode"]
+        try:
+            if (await ctx.portal.frame(barcode)).get("state") == "loaded":
+                await ctx.portal.set_frame_state(barcode, "internal_storage")
+                ctx.log(f"Portal: frame {barcode} is back in storage")
+        except PortalError as exc:
+            ctx.log(f"Portal: frame {barcode} could not be reported as returned: {exc}", "error")
+            continue
+        ctx.queue.mark(barcode, "queued")
+
+
+def _plan_measure(engine: "SequenceEngine") -> list[str]:
+    _need_empty_robot(engine.equipment)
+    try:
+        return measure.plan(engine)
+    except measure.MeasureError as exc:
+        raise SequenceError(str(exc)) from exc
 
 
 def _need_empty_robot(equipment: EquipmentState) -> None:
@@ -190,6 +265,13 @@ SEQUENCES: dict[str, Sequence] = {
             "Fetches each queued frame, reads its barcode, compares it with the portal and returns the frame.",
             _plan_verify,
             _run_verify,
+        ),
+        Sequence(
+            "measure",
+            "Measure the queue",
+            "Runs every queued measurement, frame by frame, and reports progress to the portal.",
+            _plan_measure,
+            measure.run,
         ),
         Sequence(
             "cleanup",
@@ -214,7 +296,22 @@ class SequenceEngine:
         store: StateStore,
         audit: AuditLog,
         log_dir: Path,
+        *,
+        portal=None,
+        science=None,
+        crystal=None,
+        simulation: bool = False,
+        beam=None,
+        notifier=None,
+        beam_poll_s: float = 1.0,
     ) -> None:
+        self.beam = beam
+        self.notifier = notifier
+        self._beam_poll_s = beam_poll_s
+        self.portal = portal
+        self.science = science
+        self.crystal = crystal
+        self.simulation = simulation
         self.runner = runner
         self.equipment = equipment
         self.queue = queue
@@ -266,6 +363,7 @@ class SequenceEngine:
             "finished": None,
             "step": None,
             "detail": None,
+            "waiting": None,
         }
         self.runner.sequence_running = True
         self._audit.write("sequence_started", user=user, sequence=sequence.name)
@@ -316,7 +414,10 @@ class SequenceEngine:
             await sequence.run(Context(self, user))
         except _Aborted:
             self._end("aborted", "Aborted. Everything was left where it is.")
-        except (CommandRefused, CommandFailed, ControlConnectionError, ProtocolError) as exc:
+        except (
+            CommandRefused, CommandFailed, ControlConnectionError, ProtocolError,
+            PortalError, ScienceError, measure.MeasureError,
+        ) as exc:
             self._end("failed", f"{exc} Everything was left where it is.")
         except asyncio.CancelledError:
             self._end("failed", "The backend was stopped during the sequence.")
@@ -343,9 +444,42 @@ class SequenceEngine:
         self.runner.sequence_running = True
         self._publish()
 
+    async def _wait_for_beam(self) -> None:
+        """Hold the sequence while the beam is lost. Abort and pause still
+        work; while paused by the operator, commands can be sent by hand."""
+        watch = self.beam
+        if watch is None or not watch.held:
+            return
+        label = self._status["label"]
+        self._status["waiting"] = watch.describe()
+        self._log(watch.describe(), "error")
+        await self._notify("BL22HT_Run_waiting_for_beam", f"The run '{label}' is on hold. {watch.describe()}")
+        try:
+            while watch.held:
+                await self._checkpoint()
+                if self._status["waiting"] != watch.describe():
+                    self._status["waiting"] = watch.describe()
+                    self._publish()
+                await asyncio.sleep(self._beam_poll_s)
+        finally:
+            self._status["waiting"] = None
+        self._log("The beam is back: the run goes on.")
+        await self._notify("BL22HT_Run_resumed", f"The beam is back. The run '{label}' goes on.")
+
+    async def _notify(self, subject: str, text: str) -> None:
+        if self.notifier is None or not self.notifier.addresses:
+            self._log("No e-mail sent: no operator address is configured (ROBOTWEB_OPERATOR_EMAILS).")
+            return
+        try:
+            await self.notifier.send(subject, text)
+        except (CommandFailed, ControlConnectionError, ProtocolError) as exc:
+            self._log(f"The e-mail to the operators could not be sent: {exc}", "error")
+        else:
+            self._log(f"E-mail sent to the operators ({subject})")
+
     def _end(self, state: str, detail: str | None) -> None:
         self.runner.sequence_running = False
-        self._status.update(state=state, detail=detail, step=None, finished=time.time())
+        self._status.update(state=state, detail=detail, step=None, waiting=None, finished=time.time())
         self._audit.write(
             f"sequence_{state}", user=self._status["user"], sequence=self._status["name"], detail=detail
         )

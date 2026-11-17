@@ -59,6 +59,21 @@ class Settings(BaseSettings):
     # The motor interlock rule files (a copy of the control server's).
     motor_rules_dir: Path = _REPO_ROOT / "config" / "motor_rules"
 
+    # Edge and fluorescence tables, reference foil and FY filter mappings.
+    science_dir: Path = _REPO_ROOT / "config"
+
+    # The beam watch (beam.py): the measurement sequence waits while the SPEAR
+    # current is below beam_low_ma and goes on beam_settle_s after it is above
+    # beam_ok_ma. Needs EPICS.
+    beam_pv: str = "SPEAR:BeamCurrAvg"
+    beam_low_ma: float = 400.0
+    beam_ok_ma: float = 480.0
+    beam_settle_s: float = 600.0
+
+    # Who gets an e-mail when a run stops, waits for beam or goes on again.
+    # Comma separated. Empty: no e-mails, the run log only.
+    operator_emails: str = ""
+
     # True when this backend talks to the simulated control server
     # (python -m robotweb.simulate). The page then shows a clear banner.
     simulation: bool = False

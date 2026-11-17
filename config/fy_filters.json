@@ -1,0 +1,15 @@
+{
+  "_about": "Which filter goes in front of the PIPS detector for a total-fluorescence-yield measurement. Key: the element being measured. Value: the filter's name on the control server, or an empty string for no filter. An element that is not listed gets no filter. Read when the backend starts.",
+  "V": "TI-3",
+  "Cr": "V-3",
+  "Mn": "",
+  "Fe": "MN-3",
+  "Co": "FE-3",
+  "Ni": "CO-3",
+  "Cu": "NI-3",
+  "Zn": "CU-3",
+  "Ga": "ZN-3",
+  "Ge": "GA-3",
+  "Nb": "ZR-3",
+  "Mo": "NB-3"
+}

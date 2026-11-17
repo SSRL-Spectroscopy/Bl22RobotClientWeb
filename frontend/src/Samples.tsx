@@ -60,6 +60,19 @@ function kind(m: Measurement): string {
   return `${m.element} ${m.edge} ${m.technique.toUpperCase()} ${detection}, ${m.beam}`
 }
 
+// How far a run has got, in words. Nothing is shown for "queued".
+const FRAME_STATES: Record<string, string> = {
+  scheduled: '○ scheduled',
+  loaded: '▶ on the robot',
+  done: '● complete',
+}
+const MEASUREMENT_STATES: Record<string, string> = {
+  running: '▶ running',
+  uploaded: '▶ uploaded',
+  done: '● done',
+  failed: '✕ failed',
+}
+
 function Queue({
   queue,
   loggedIn,
@@ -122,6 +135,7 @@ function Queue({
                 container {item.container}, slot {item.slot} · {item.measurements.length} measurement
                 {item.measurements.length === 1 ? '' : 's'}
               </span>
+              {FRAME_STATES[item.state] && <span>{FRAME_STATES[item.state]}</span>}
               {item.state === 'verified' && (
                 <span>
                   <span aria-hidden="true">● </span>barcode verified
@@ -155,7 +169,10 @@ function Queue({
               {item.measurements.map((m) => (
                 <li key={m.id}>
                   {what(m)} <span className="hint">({how(m)})</span>
-                  {m.status && m.status !== 'pending' && <span> · measure again (portal: {m.status})</span>}
+                  {m.status && m.status !== 'pending' && m.state === 'queued' && (
+                    <span> · measure again (portal: {m.status})</span>
+                  )}
+                  {m.state && MEASUREMENT_STATES[m.state] && <strong> · {MEASUREMENT_STATES[m.state]}</strong>}
                 </li>
               ))}
             </ul>
