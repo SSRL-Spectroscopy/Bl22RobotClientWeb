@@ -1,0 +1,47 @@
+private void EchoReq(string _req, ref ClientObj _omClient)
+{
+    Console.WriteLine(_omClient.id + " > " + _req);
+}
+private void EchoRes(string _res, ref ClientObj _omClient)
+{
+    Console.Write(_omClient.id + " < " + _res.Replace("\r", " | ") + "\r\n");
+}
+
+
+
+
+1 > SAMPLE GET_SAMPLE_STORAGE_SLOTS
+1 < SUCCESS SAMPLE GET_SAMPLE_STORAGE_SLOTS  | 1 1 1 1 0 0 0 1 1 1 1 0  | 1 1 1 1 1 1 0 1 1 1 1 0  | 1 1 1 1 1 1 1 1 0 0 0 0
+
+1 > SAMPLE GET_STATUS
+1 < SUCCESS SAMPLE GET_STATUS  | IDLE NO_ERROR
+
+1 > SAMPLE GET_STATUS
+1 < SUCCESS SAMPLE GET_STATUS  | MoveSampleToBeam NO_ERROR
+
+1 > SAMPLE GET_STATUS
+1 < SUCCESS SAMPLE GET_STATUS  | ReturnSample NO_ERROR
+
+1 > SAMPLE GET_FRAME 0 0
+1 < SUCCESS SAMPLE GET_FRAME
+
+1 > SAMPLE RETURN_FRAME 0 0
+1 < SUCCESS SAMPLE RETURN_FRAME
+
+1 > SCAN GET_STATUS
+1 < SUCCESS SCAN GET_STATUS  | IDLE no_error
+
+1 > SCAN GET_MONO_ENERGY
+1 < SUCCESS SCAN GET_MONO_ENERGY  | 5966.002295
+
+1 > SCHEDULER GET_FRAME_INFO EETK-SCIO
+1 < ERROR: OmServer.HandleClient Server EvaluateRequest SchedulerSrv.EvaluateRequest EvaluateRequest SchedulerSrv.GetFrameInfo Bl22ApiV2Access.GetFrame HTTP_404 {"detail":"Unknown barcode"}
+
+1 > SCHEDULER GET_FRAME_INFO COE-MWV
+1 < SUCCESS SCHEDULER GET_FRAME_INFO  | COE-MWV internal_storage True True 8-circle 8-circle Molleigh Preefer | 6adaa78a5a0047dc4b558c6a 6ad809f05a0047dc4b558c3f Left-C 8-circle 1 exafs Co K transmission_sdd focused done 2 12 | 6adaa79c5a0047dc4b558c6b 6ad80a245a0047dc4b558c44 Right-C 8-circle 1 exafs Ni K transmission_sdd focused done 2 12
+
+1 > BEAMLINE GET_STATUS
+1 < SUCCESS BEAMLINE GET_STATUS  | IDLE no_error
+
+1 > BEAMLINE GET_GAIN
+1 < SUCCESS BEAMLINE GET_GAIN  | 1x1e9_V/A 1x1e9_V/A 1x1e9_V/A 1x1e9_V/A

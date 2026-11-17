@@ -1,0 +1,29 @@
+{
+	"motor_type"	:	"TRINAMIC",
+	"motor_name"	:	"SOL_VERT",
+	"rules"	:	[
+		{
+			"position_min"	:	"0.0",
+			"position_max"	:	"160.0",
+			"target_min"	:	"0.0",
+			"target_max"	:	"160.0",
+			"direction"		:	"1",
+			"conditions"	:	[
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"DET_X",
+					"position_min"	:	"0.0",
+					"position_max"	:	"10.0",
+					"message"		:	""
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"DET_Y",
+					"position_min"	:	"128.0",
+					"position_max"	:	"145.0",
+					"message"		:	""
+				}				
+			]
+		}
+	]
+}

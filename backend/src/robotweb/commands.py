@@ -1,0 +1,287 @@
+"""The commands an operator can send, and the rules for when each is allowed.
+
+The browser never sends protocol strings. It names a command from this file
+and supplies its parameters; the backend validates them, checks the
+preconditions against the equipment state, and builds the string.
+
+To add a command: write a Command (or Query) below and add it to the table at
+the end of the file.
+"""
+
+import re
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+from .equipment import FILTER, FRAME, REFERENCE, EquipmentState
+
+CONTAINERS = 3
+SLOTS_PER_CONTAINER = 12
+_NAME = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
+
+
+class CommandRefused(Exception):
+    """The command is not allowed right now, or its parameters are invalid."""
+
+
+@dataclass(frozen=True)
+class Param:
+    name: str
+    label: str
+    kind: str  # "int" or "name"
+    min: int | None = None
+    max: int | None = None
+
+    def clean(self, raw: Any) -> Any:
+        if self.kind == "int":
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                raise CommandRefused(f"{self.label} must be a whole number")
+            if (self.min is not None and raw < self.min) or (self.max is not None and raw > self.max):
+                raise CommandRefused(f"{self.label} must be between {self.min} and {self.max}")
+            return raw
+        if not isinstance(raw, str) or not _NAME.fullmatch(raw):
+            raise CommandRefused(f"{self.label}: 1 to 24 characters from A-Z a-z 0-9 _ -")
+        return raw
+
+
+@dataclass(frozen=True)
+class Command:
+    """A command that starts a process on the control server.
+
+    check    raises CommandRefused unless the equipment state allows it
+    build    returns the protocol string
+    changes  the equipment items the process changes
+    result   the new values of those items once the process has succeeded
+    """
+
+    name: str
+    label: str
+    subsystem: str
+    check: Callable[[EquipmentState, dict], None]
+    build: Callable[[EquipmentState, dict], str]
+    result: Callable[[EquipmentState, dict], dict[str, Any]]
+    changes: tuple[str, ...]
+    params: tuple[Param, ...] = ()
+    group: str = "Sample handling"
+    # The command takes a frame out of storage: the slot named by the
+    # "container" and "slot" parameters must be occupied.
+    needs_occupied_slot: bool = False
+
+    def clean_args(self, raw: dict) -> dict:
+        unexpected = set(raw) - {p.name for p in self.params}
+        if unexpected:
+            raise CommandRefused(f"unexpected parameter: {', '.join(sorted(unexpected))}")
+        missing = [p.label for p in self.params if p.name not in raw]
+        if missing:
+            raise CommandRefused(f"missing: {', '.join(missing)}")
+        return {p.name: p.clean(raw[p.name]) for p in self.params}
+
+    def describe(self) -> dict:
+        return {
+            "name": self.name,
+            "label": self.label,
+            "group": self.group,
+            "subsystem": self.subsystem,
+            "params": [
+                {"name": p.name, "label": p.label, "kind": p.kind, "min": p.min, "max": p.max}
+                for p in self.params
+            ],
+        }
+
+
+@dataclass(frozen=True)
+class Query:
+    """A read-only request that answers at once and changes nothing."""
+
+    name: str
+    label: str
+    text: str
+    publish_as: str | None = None  # state key to publish the answer under
+    params: tuple[Param, ...] = field(default_factory=tuple)
+
+    def describe(self) -> dict:
+        return {"name": self.name, "label": self.label}
+
+
+# ---- precondition helpers --------------------------------------------------
+
+_WORDS = {FRAME: "the frame on the beam", REFERENCE: "the reference foil", FILTER: "the FY filter"}
+
+
+def _need_known(equipment: EquipmentState, *items: str) -> None:
+    for item in items:
+        if not equipment.is_known(item):
+            raise CommandRefused(
+                f"The backend does not know the state of {_WORDS[item]}. Declare what is actually loaded first."
+            )
+
+
+def _need_empty(equipment: EquipmentState, item: str, why: str) -> None:
+    _need_known(equipment, item)
+    if equipment.value(item) is not None:
+        raise CommandRefused(why)
+
+
+def _need_loaded(equipment: EquipmentState, item: str, why: str) -> None:
+    _need_known(equipment, item)
+    if equipment.value(item) is None:
+        raise CommandRefused(why)
+
+
+# RULE (confirmed by the beamline scientist, 2026-11-16): there is one robot.
+# It moves frames, reference foils and FY filters, and it also holds the frame
+# in the beam during a measurement. While it holds a frame it cannot move
+# anything else, so the frame must go back to storage before a reference or a
+# filter is fetched or returned.
+_FRAME_IN_THE_WAY = (
+    "Return the frame to storage first: the robot is holding it and cannot move anything else."
+)
+
+
+# ---- sample handling ---------------------------------------------------------
+
+
+def _check_get_frame(eq: EquipmentState, args: dict) -> None:
+    _need_empty(eq, FRAME, "A frame is already on the beam. Return it first.")
+
+
+def _check_return_frame(eq: EquipmentState, args: dict) -> None:
+    _need_loaded(eq, FRAME, "There is no frame on the beam to return.")
+
+
+def _frame_text(verb: str) -> Callable[[EquipmentState, dict], str]:
+    def build(eq: EquipmentState, args: dict) -> str:
+        frame = args if verb == "GET_FRAME" else eq.value(FRAME)
+        return f"SAMPLE {verb} {frame['container']} {frame['slot']}"
+
+    return build
+
+
+def _check_get_reference(eq: EquipmentState, args: dict) -> None:
+    _need_empty(eq, FRAME, _FRAME_IN_THE_WAY)
+    _need_empty(eq, REFERENCE, "A reference foil is already loaded. Return it first.")
+
+
+def _check_return_reference(eq: EquipmentState, args: dict) -> None:
+    _need_empty(eq, FRAME, _FRAME_IN_THE_WAY)
+    _need_loaded(eq, REFERENCE, "There is no reference foil to return.")
+
+
+def _check_get_filter(eq: EquipmentState, args: dict) -> None:
+    _need_empty(eq, FRAME, _FRAME_IN_THE_WAY)
+    _need_empty(eq, FILTER, "An FY filter is already loaded. Return it first.")
+
+
+def _check_return_filter(eq: EquipmentState, args: dict) -> None:
+    _need_empty(eq, FRAME, _FRAME_IN_THE_WAY)
+    _need_loaded(eq, FILTER, "There is no FY filter to return.")
+
+
+COMMANDS: dict[str, Command] = {
+    c.name: c
+    for c in (
+        Command(
+            name="get_frame",
+            label="Get frame",
+            subsystem="SAMPLE",
+            params=(
+                Param("container", "Container", "int", 0, CONTAINERS - 1),
+                Param("slot", "Slot", "int", 0, SLOTS_PER_CONTAINER - 1),
+            ),
+            check=_check_get_frame,
+            build=_frame_text("GET_FRAME"),
+            needs_occupied_slot=True,
+            changes=(FRAME,),
+            result=lambda eq, a: {FRAME: {"container": a["container"], "slot": a["slot"]}},
+        ),
+        Command(
+            name="return_frame",
+            label="Return frame",
+            subsystem="SAMPLE",
+            check=_check_return_frame,
+            build=_frame_text("RETURN_FRAME"),
+            changes=(FRAME,),
+            result=lambda eq, a: {FRAME: None},
+        ),
+        Command(
+            name="get_reference",
+            label="Get reference",
+            subsystem="SAMPLE",
+            params=(Param("name", "Reference", "name"),),
+            check=_check_get_reference,
+            build=lambda eq, a: f"SAMPLE GET_REF {a['name']}",
+            changes=(REFERENCE,),
+            result=lambda eq, a: {REFERENCE: a["name"]},
+        ),
+        Command(
+            name="return_reference",
+            label="Return reference",
+            subsystem="SAMPLE",
+            check=_check_return_reference,
+            build=lambda eq, a: f"SAMPLE RETURN_REF {eq.value(REFERENCE)}",
+            changes=(REFERENCE,),
+            result=lambda eq, a: {REFERENCE: None},
+        ),
+        Command(
+            name="get_filter",
+            label="Get FY filter",
+            subsystem="SAMPLE",
+            params=(Param("name", "Filter", "name"),),
+            check=_check_get_filter,
+            build=lambda eq, a: f"SAMPLE GET_FILTER {a['name']}",
+            changes=(FILTER,),
+            result=lambda eq, a: {FILTER: a["name"]},
+        ),
+        Command(
+            name="return_filter",
+            label="Return FY filter",
+            subsystem="SAMPLE",
+            check=_check_return_filter,
+            build=lambda eq, a: "SAMPLE RETURN_FILTER",
+            changes=(FILTER,),
+            result=lambda eq, a: {FILTER: None},
+        ),
+    )
+}
+
+QUERIES: dict[str, Query] = {
+    q.name: q
+    for q in (
+        Query("storage_slots", "Storage slots", "SAMPLE GET_SAMPLE_STORAGE_SLOTS", publish_as="storage_slots"),
+        Query("mono_energy", "Mono energy", "SCAN GET_MONO_ENERGY"),
+        Query("gain", "Amplifier gain", "BEAMLINE GET_GAIN"),
+        Query("slit_gap", "Slit gap", "BEAMLINE GET_SLIT_GAP"),
+        Query("slit_center", "Slit centre", "BEAMLINE GET_SLIT_CENTER"),
+    )
+}
+
+
+def slot_is_occupied(lines: list[str], container: int, slot: int) -> bool:
+    """Read the answer to SAMPLE GET_SAMPLE_STORAGE_SLOTS: one line per
+    container, one flag per slot, "1" meaning occupied.
+
+    Raises CommandRefused if the answer does not have the expected shape.
+    """
+    try:
+        flag = lines[container].split()[slot]
+    except IndexError:
+        raise CommandRefused("The storage slot list from the control server could not be read.") from None
+    if flag not in ("0", "1"):
+        raise CommandRefused("The storage slot list from the control server could not be read.")
+    return flag == "1"
+
+
+def clean_declaration(item: str, value: Any) -> Any:
+    """Validate what an operator declares to be loaded. None means nothing."""
+    if value is None:
+        return None
+    if item == FRAME:
+        if not isinstance(value, dict) or set(value) != {"container", "slot"}:
+            raise CommandRefused("a frame is declared by its container and slot")
+        return {
+            "container": Param("container", "Container", "int", 0, CONTAINERS - 1).clean(value["container"]),
+            "slot": Param("slot", "Slot", "int", 0, SLOTS_PER_CONTAINER - 1).clean(value["slot"]),
+        }
+    if item in (REFERENCE, FILTER):
+        return Param("name", "Name", "name").clean(value)
+    raise CommandRefused(f"unknown item {item!r}")

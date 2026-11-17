@@ -1,0 +1,14 @@
+{
+	"motor_type"	:	"TRINAMIC",
+	"motor_name"	:	"REF_PIVOT",	
+	"rules"	:	[
+		{
+			"position_min"	:	"-5.0",
+			"position_max"	:	"65.0",
+			"target_min"	:	"-5.0",
+			"target_max"	:	"65.0",
+			"direction"		:	"0",
+			"conditions"	:	[]
+		}
+	]
+}

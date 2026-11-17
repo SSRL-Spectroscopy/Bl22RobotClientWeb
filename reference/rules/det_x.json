@@ -1,0 +1,263 @@
+{
+	"motor_type"	:	"TRINAMIC",
+	"motor_name"	:	"DET_X",		
+	"rules"	:	[
+		{
+			"position_min"	:	"-10.0",
+			"position_max"	:	"170.0",
+			"target_min"	:	"-10.0",
+			"target_max"	:	"260.0",
+			"direction"		:	"0",
+			"conditions"	:	[
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"DET_Y",
+					"position_min"	:	"128.0",
+					"position_max"	:	"145.0",
+					"message"		:	"retract detector (DET_Y) first, must be >128"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"BOT_VERT",
+					"position_min"	:	"210.0",
+					"position_max"	:	"220.0",
+					"message"		:	"BOT_VERT too low, must be >210"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"PIPS_VERT",
+					"position_min"	:	"0.0",
+					"position_max"	:	"30.0",
+					"message"		:	"PIPS too high, must be <30"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"SOL_VERT",
+					"position_min"	:	"0.0",
+					"position_max"	:	"30.0",
+					"message"		:	"Soller too high, must be <30"
+				},
+				{
+					"motor_type"	:	"MECA",					
+					"motor_name"	:	"JOINT_1",
+					"position_min"	:	"-120.0",
+					"position_max"	:	"0.0",
+					"message"		:	"Robot in the wrong hemispehre"
+				},
+				{
+					"motor_type"	:	"MECA",
+					"motor_name"	:	"JOINT_2",
+					"position_min"	:	"10.0",
+					"position_max"	:	"45.0",
+					"message"		:	"Robot in the wrong hemispehre"
+				}
+			]
+		},
+		{
+			"position_min"	:	"230.0",
+			"position_max"	:	"260.0",
+			"target_min"	:	"-10.0",
+			"target_max"	:	"260.0",
+			"direction"		:	"0",
+			"conditions"	:	[
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"DET_Y",
+					"position_min"	:	"128.0",
+					"position_max"	:	"145.0",
+					"message"		:	"retract detector (DET_Y) first, must be >128"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"BOT_VERT",
+					"position_min"	:	"210.0",
+					"position_max"	:	"220.0",
+					"message"		:	"BOT_VERT too low, must be >210"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"PIPS_VERT",
+					"position_min"	:	"0.0",
+					"position_max"	:	"30.0",
+					"message"		:	"PIPS too high, must be <30"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"SOL_VERT",
+					"position_min"	:	"0.0",
+					"position_max"	:	"30.0",
+					"message"		:	"Soller too high, must be <30"
+				},
+				{
+					"motor_type"	:	"MECA",					
+					"motor_name"	:	"JOINT_1",
+					"position_min"	:	"-120.0",
+					"position_max"	:	"0.0",
+					"message"		:	"Robot in the wrong hemispehre"
+				},
+				{
+					"motor_type"	:	"MECA",
+					"motor_name"	:	"JOINT_2",
+					"position_min"	:	"10.0",
+					"position_max"	:	"45.0",
+					"message"		:	"Robot in the wrong hemispehre"
+				}
+			]
+		},
+		{
+			"position_min"	:	"170.0",
+			"position_max"	:	"230.0",
+			"target_min"	:	"170.0",
+			"target_max"	:	"230.0",
+			"direction"		:	"0",
+			"conditions"	:	[
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"DET_Y",
+					"position_min"	:	"10.0",
+					"position_max"	:	"145.0",
+					"message"		:	""
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"BOT_VERT",
+					"position_min"	:	"210.0",
+					"position_max"	:	"220.0",
+					"message"		:	"BOT_VERT too low, must be >210"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"PIPS_VERT",
+					"position_min"	:	"0.0",
+					"position_max"	:	"30.0",
+					"message"		:	"PIPS too high, must be <30"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"SOL_VERT",
+					"position_min"	:	"0.0",
+					"position_max"	:	"30.0",
+					"message"		:	"Soller too high, must be <30"
+				},
+				{
+					"motor_type"	:	"MECA",					
+					"motor_name"	:	"JOINT_1",
+					"position_min"	:	"-120.0",
+					"position_max"	:	"0.0",
+					"message"		:	"Robot in the wrong hemispehre"
+				},
+				{
+					"motor_type"	:	"MECA",
+					"motor_name"	:	"JOINT_2",
+					"position_min"	:	"10.0",
+					"position_max"	:	"45.0",
+					"message"		:	"Robot in the wrong hemispehre"
+				}
+			]
+		},
+		{
+			"position_min"	:	"170.0",
+			"position_max"	:	"230.0",
+			"target_min"	:	"-10.0",
+			"target_max"	:	"170.0",
+			"direction"		:	"0",
+			"conditions"	:	[
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"DET_Y",
+					"position_min"	:	"128.0",
+					"position_max"	:	"145.0",
+					"message"		:	"retract detector (DET_Y) first, must be >128"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"BOT_VERT",
+					"position_min"	:	"210.0",
+					"position_max"	:	"220.0",
+					"message"		:	"BOT_VERT too low, must be >210"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"PIPS_VERT",
+					"position_min"	:	"0.0",
+					"position_max"	:	"30.0",
+					"message"		:	"PIPS too high, must be <30"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"SOL_VERT",
+					"position_min"	:	"0.0",
+					"position_max"	:	"30.0",
+					"message"		:	"Soller too high, must be <30"
+				},
+				{
+					"motor_type"	:	"MECA",					
+					"motor_name"	:	"JOINT_1",
+					"position_min"	:	"-120.0",
+					"position_max"	:	"0.0",
+					"message"		:	"Robot in the wrong hemispehre"
+				},
+				{
+					"motor_type"	:	"MECA",
+					"motor_name"	:	"JOINT_2",
+					"position_min"	:	"10.0",
+					"position_max"	:	"45.0",
+					"message"		:	"Robot in the wrong hemispehre"
+				}
+			]
+		},
+		{
+			"position_min"	:	"170.0",
+			"position_max"	:	"230.0",
+			"target_min"	:	"230.0",
+			"target_max"	:	"260.0",
+			"direction"		:	"0",
+			"conditions"	:	[
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"DET_Y",
+					"position_min"	:	"128.0",
+					"position_max"	:	"145.0",
+					"message"		:	"retract detector (DET_Y) first, must be >128"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"BOT_VERT",
+					"position_min"	:	"210.0",
+					"position_max"	:	"220.0",
+					"message"		:	"BOT_VERT too low, must be >210"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"PIPS_VERT",
+					"position_min"	:	"0.0",
+					"position_max"	:	"30.0",
+					"message"		:	"PIPS too high, must be <30"
+				},
+				{
+					"motor_type"	:	"TRINAMIC",
+					"motor_name"	:	"SOL_VERT",
+					"position_min"	:	"0.0",
+					"position_max"	:	"30.0",
+					"message"		:	"Soller too high, must be <30"
+				},
+				{
+					"motor_type"	:	"MECA",					
+					"motor_name"	:	"JOINT_1",
+					"position_min"	:	"-120.0",
+					"position_max"	:	"0.0",
+					"message"		:	"Robot in the wrong hemispehre"
+				},
+				{
+					"motor_type"	:	"MECA",
+					"motor_name"	:	"JOINT_2",
+					"position_min"	:	"10.0",
+					"position_max"	:	"45.0",
+					"message"		:	"Robot in the wrong hemispehre"
+				}
+			]
+		}
+
+
+	]
+}

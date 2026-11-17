@@ -1,0 +1,14 @@
+{
+	"motor_type"	:	"TRINAMIC",
+	"motor_name"	:	"SOL_HOR",	
+	"rules"	:	[
+		{
+			"position_min"	:	"0.0",
+			"position_max"	:	"20.0",
+			"target_min"	:	"0.0",
+			"target_max"	:	"20.0",
+			"direction"		:	"0",
+			"conditions"	:	[]
+		}
+	]
+}
