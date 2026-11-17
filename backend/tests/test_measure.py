@@ -63,7 +63,7 @@ class Rig:
             poll_s=0.005,
             max_poll_failures=3,
         )
-        self.queue = MeasurementQueue(tmp_path / "queue.json", self.store, audit)
+        self.queue = MeasurementQueue(tmp_path / "queue.json", self.store, audit, order=Science(CONFIG).ordered)
         self.portal = FakePortal()
         self.portal.frames = {"KQZ-TBW": frame("KQZ-TBW", 0, 9), "ABC-DEF": second_frame()}
         self.crystal = Crystal(Memory(), self.store, audit, simulated=True)
@@ -183,6 +183,18 @@ async def test_plan_shows_foil_energies_and_order(rig):
     assert text.index("Fe K: reference foil Fe") < text.index("Ni K: reference foil Ni")
     assert "Left-A EXAFS transmission + sdd, unfocused: 6912 to 8112 eV, 8 sweeps of 240 s" in text
     assert steps[-1] == "Return the reference foil and the FY filter"
+
+
+async def test_the_queue_lists_measurements_in_run_order(rig, tmp_path):
+    rig.add("KQZ-TBW", [M3, M1])  # the portal lists Fe K (M1) before Ni K (M3); so does the run
+    shown = [m["id"] for m in rig.store.get("queue")["items"][0]["measurements"]]
+    assert shown == [M1, M3]
+    # a queue file written in another order is put right when it is loaded
+    saved = tmp_path / "queue.json"
+    saved.write_text(saved.read_text().replace(M1, "x" * 24).replace(M3, M1).replace("x" * 24, M3))
+    saved.write_text(saved.read_text().replace('"Fe"', '"Q"').replace('"Ni"', '"Fe"').replace('"Q"', '"Ni"'))
+    again = MeasurementQueue(saved, StateStore(), AuditLog(tmp_path / "audit2.log"), order=Science(CONFIG).ordered)
+    assert [m["element"] for m in again.items[0]["measurements"]] == ["Fe", "Ni"]
 
 
 async def test_one_frame_two_edges(rig):

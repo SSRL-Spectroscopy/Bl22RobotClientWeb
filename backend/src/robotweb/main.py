@@ -97,7 +97,7 @@ async def lifespan(app: FastAPI):
 
     portal = PortalClient(settings.bl22_api_url, settings.bl22_api_key)
     app.state.portal = portal
-    app.state.queue = MeasurementQueue(settings.queue_file, store, audit)
+    app.state.queue = MeasurementQueue(settings.queue_file, store, audit, order=app.state.science.ordered)
     # Without EPICS (tests, simulator) there is no SPEAR current to watch.
     beam = None
     if settings.epics_enabled:

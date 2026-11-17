@@ -9,6 +9,7 @@ every browser receives, Observers included) leaves out owner and sample names.
 import json
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from .audit import AuditLog
@@ -32,13 +33,34 @@ class QueueError(Exception):
 
 
 class MeasurementQueue:
-    def __init__(self, path: Path, store: StateStore, audit: AuditLog) -> None:
+    def __init__(
+        self,
+        path: Path,
+        store: StateStore,
+        audit: AuditLog,
+        *,
+        order: Callable[[list[dict]], list[dict]] | None = None,
+    ) -> None:
+        """`order` puts a frame's measurements in the order the measurement
+        sequence runs them (Science.ordered), so that the queue reads from top
+        to bottom as it will be measured. Without it the portal's order is kept."""
         self._path = path
         self._store = store
         self._audit = audit
+        self._order = order
         self._items: list[dict] = []
         self._load()
+        for item in self._items:  # a queue saved by an older version
+            item["measurements"] = self._in_run_order(item["measurements"])
         self._publish()
+
+    def _in_run_order(self, measurements: list[dict]) -> list[dict]:
+        if self._order is None:
+            return measurements
+        try:
+            return self._order(measurements)
+        except Exception:  # noqa: BLE001  an element the tables do not know: keep the given order
+            return measurements
 
     @property
     def items(self) -> list[dict]:
@@ -77,9 +99,11 @@ class MeasurementQueue:
                     f"A selected measurement has the unknown status '{measurement['status']}' in the portal."
                 )
             chosen.append({**measurement, "state": "queued"})
-        # keep the portal's order: by position, then measurement number
+        # The portal's order (by position, then measurement number) first; the
+        # run order is a stable sort on top of it.
         order = {m["id"]: index for index, m in enumerate(frame["measurements"])}
         chosen.sort(key=lambda m: order[m["id"]])
+        chosen = self._in_run_order(chosen)
 
         item = {
             "barcode": barcode,
