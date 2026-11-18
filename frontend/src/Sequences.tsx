@@ -187,7 +187,7 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
               </select>
             </label>
             <button type="button" onClick={showPlan}>
-              Show the steps
+              Create Sequence
             </button>
             <p className="hint">{chosen.description}</p>
             {plan && (

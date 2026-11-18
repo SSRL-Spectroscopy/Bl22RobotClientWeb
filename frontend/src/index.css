@@ -1349,3 +1349,23 @@ p.form-error::before {
 .signals .stale td {
   color: var(--text-muted);
 }
+
+/* ---- no horizontal scroll bar in the sequence view ---- */
+
+/* A row was as wide as its box plus its own padding, so it stuck out to the
+   right by that padding. Count the padding inside the width. */
+.step-row {
+  box-sizing: border-box;
+}
+
+/* Long step titles and log lines wrap instead of widening the panel. */
+.step-title,
+.run-log > div {
+  overflow-wrap: anywhere;
+}
+
+.step-box,
+.run-log,
+.command-panel.fill {
+  overflow-x: hidden;
+}
