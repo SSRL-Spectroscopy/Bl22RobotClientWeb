@@ -83,14 +83,22 @@ def parse_response(raw: bytes) -> Response:
 
 
 def parse_status(response: Response) -> SubsystemStatus:
-    """Interpret the answer to "<SUBSYSTEM> GET_STATUS": "<state> <error>"."""
+    """Interpret the answer to "<SUBSYSTEM> GET_STATUS": "<state> <error>".
+
+    The name of a running step can be several words ("AutoGas Restore HV
+    no_error" while the ion chambers are filled), so while a subsystem is
+    busy the error is the last word and the state is everything before it.
+    When it is idle, everything after IDLE is the error.
+    """
     if not response.ok:
         raise ProtocolError(f"status request failed: {response.error}")
-    parts = response.first.split(maxsplit=1)
-    state = parts[0]
-    error = parts[1].strip() if len(parts) > 1 else NO_ERROR
-    if error.upper() == NO_ERROR:
+    words = response.first.split()
+    if words[0].upper() == IDLE:
+        state, error = IDLE, " ".join(words[1:])
+    elif len(words) > 1:
+        state, error = " ".join(words[:-1]), words[-1]
+    else:
+        state, error = words[0], ""
+    if error == "" or error.upper() == NO_ERROR:
         error = NO_ERROR
-    if state.upper() == IDLE:
-        state = IDLE
     return SubsystemStatus(state=state, error=error)

@@ -82,6 +82,14 @@ def test_garbage_is_a_protocol_error():
         ("IDLE no_error", "IDLE", True, False),
         ("MoveSampleToBeam NO_ERROR", "MoveSampleToBeam", False, False),
         ("IDLE GRIPPER_FAULT", "IDLE", True, True),
+        # the steps of filling the ion chambers have names of several words
+        ("AutoGas Shutoff HV no_error", "AutoGas Shutoff HV", False, False),
+        ("AutoGas FILL I0 no_error", "AutoGas FILL I0", False, False),
+        ("AutoGas Restore HV no_error", "AutoGas Restore HV", False, False),
+        ("AutoGas FILL I0 VALVE_FAULT", "AutoGas FILL I0", False, True),
+        ("IDLE gas pressure low", "IDLE", True, True),
+        ("IDLE", "IDLE", True, False),
+        ("Homing", "Homing", False, False),
     ],
 )
 def test_parse_status(line, state, idle, failed):

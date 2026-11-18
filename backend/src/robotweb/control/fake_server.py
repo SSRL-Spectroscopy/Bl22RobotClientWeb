@@ -26,7 +26,8 @@ START_COMMANDS: dict[tuple[str, str], str] = {
     ("SAMPLE", "GET_FILTER"): "GetFilter",
     ("SAMPLE", "RETURN_FILTER"): "ReturnFilter",
     ("BEAMLINE", "MOVE_MONO"): "MoveMono",
-    ("BEAMLINE", "AUTO_GAS_FILL"): "AutoGasFill",
+    # several words, as the real server reports it
+    ("BEAMLINE", "AUTO_GAS_FILL"): "AutoGas FILL I0",
     ("BEAMLINE", "SET_SLIT_GAP"): "SetSlitGap",
     ("BEAMLINE", "AUTO_DETUNE"): "AutoDetune",
     ("BEAMLINE", "ALIGN_TABLE"): "AlignTable",
