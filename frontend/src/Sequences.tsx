@@ -189,16 +189,25 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
             <button type="button" onClick={showPlan}>
               Create Sequence
             </button>
+            {/* Red while it can be pressed: it moves the robot. */}
+            <button
+              type="button"
+              className="danger"
+              disabled={!iHold || plan === null}
+              title={
+                plan === null
+                  ? 'Create the sequence first, to see its steps'
+                  : iHold
+                    ? `Start: ${chosen.label}`
+                    : 'Take control to start it'
+              }
+              onClick={start}
+            >
+              Start Sequence
+            </button>
+            {plan !== null && !iHold && <span className="hint">Take control to start it.</span>}
             <p className="hint">{chosen.description}</p>
-            {plan && (
-              <>
-                <StepTree nodes={plan} label={`Steps planned: ${chosen.label}`} />
-                <button type="button" className="primary" disabled={!iHold} onClick={start}>
-                  Start: {chosen.label}
-                </button>
-                {!iHold && <span className="hint"> Take control to start it.</span>}
-              </>
-            )}
+            {plan && <StepTree nodes={plan} label={`Steps planned: ${chosen.label}`} />}
           </div>
         )}
         {!active && me.user === null && <p className="hint">Log in as an operator to run sequences.</p>}

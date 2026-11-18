@@ -1470,3 +1470,19 @@ button:disabled .icon-refresh,
 button:disabled .icon-trash {
   color: var(--text-muted);
 }
+
+/* ---- a button that starts something on the hardware ---- */
+
+/* Red only while it can be pressed; disabled it looks like any other
+   disabled button. */
+button.danger:not(:disabled) {
+  background: var(--critical);
+  border-color: var(--critical);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.sequence-start button + button,
+.sequence-start button + .hint {
+  margin-left: 0.5rem;
+}
