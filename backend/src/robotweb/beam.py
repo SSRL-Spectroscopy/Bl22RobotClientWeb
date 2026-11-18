@@ -108,7 +108,14 @@ class BeamWatch:
         if self._store is not None:
             self._store.publish(
                 BEAM_KEY,
-                {"held": self.held, "losses": self.losses, "text": self.describe(), "ts": time.time()},
+                {
+                    "held": self.held,
+                    "losses": self.losses,
+                    "text": self.describe(),
+                    # for the page: below this the SPEAR tile turns amber
+                    "low_ma": self.low_ma,
+                    "ts": time.time(),
+                },
             )
 
 

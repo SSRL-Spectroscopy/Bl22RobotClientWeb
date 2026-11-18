@@ -64,7 +64,9 @@ Initial PVs:
 | `BL22:SCAN:MASTER:ADC3` | V | I_2 |
 | `BL22:SCAN:MASTER:ADC4` | V | PIPS |
 | `SPEAR:BeamCurrAvg` | mA | SPEAR current |
-| `BL22:SCAN:MASTER.RTME` | s | Remaining time |
+| `BL22:SCAN:MASTER.RTME` | s | DAQ RTME (remaining time) |
+| `BL22:SCAN:MASTER.TRIG` | | DAQ TRIGGER (state name) |
+| `XSP3_7Chan:det1:DetectorState_RBV`, `StatusMessage_RBV` | | XSPRESS status and its message |
 | `BL22:SCAN:MASTER:MOTOR1.REP` | counts | Mono encoder (raw) |
 | `BL22:SCAN:MASTER:MOTOR1.UREV`, `.EREV` | | Units and encoder counts per revolution (constant) |
 | `BL22:STORE:CRYSTAL_ENCODER_OFFSET` | deg | Encoder offset; changes at every energy calibration |
@@ -245,7 +247,7 @@ The limits are settings: `ROBOTWEB_BEAM_LOW_MA`, `ROBOTWEB_BEAM_OK_MA`, `ROBOTWE
 
 ### E-mails to the operators
 
-The control server sends them (`SCHEDULER SEND_MESSAGE <address> <subject> <text>`, as the C# client did); see `backend/src/robotweb/notify.py`. The measurement sequence sends one when it starts waiting for beam, when it goes on again, and when it stops on a failure. The addresses are in `ROBOTWEB_OPERATOR_EMAILS` in `backend/.env`, comma separated. They are not written to the run log. Without addresses nothing is sent and the run log says so. A message that cannot be sent is logged and never stops the run.
+The backend sends them straight to a mail server (SMTP) when `ROBOTWEB_SMTP_HOST` is set in `backend/.env`; the account name and password are in the same file and are never logged, and a password is only sent over an encrypted connection. Without a mail server the control server sends them (`SCHEDULER SEND_MESSAGE <address> <subject> <text>`, as the C# client did). The simulator never uses the mail server. See `backend/src/robotweb/notify.py`. The measurement sequence sends one when it starts waiting for beam, when it goes on again, and when it stops on a failure. The addresses are in `ROBOTWEB_OPERATOR_EMAILS` in `backend/.env`, comma separated. They are not written to the run log. Without addresses nothing is sent and the run log says so. A message that cannot be sent is logged and never stops the run.
 
 ### Science rules
 

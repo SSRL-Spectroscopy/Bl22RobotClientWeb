@@ -65,7 +65,7 @@ export function Crystal({ me, state }: { me: Me; state: Record<string, unknown> 
   return (
     <section aria-label="Monochromator crystal">
       <h2>Monochromator crystal</h2>
-      <div className="command-panel">
+      <div className="command-panel crystal">
         <p className="crystal-now" role="status">
           {crystal?.cut ? (
             <>

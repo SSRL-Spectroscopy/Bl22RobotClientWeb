@@ -42,19 +42,62 @@ function readStoredTab(): TabId {
 }
 
 type PvEntry = { connected: boolean; value: unknown }
+type BeamEntry = { low_ma?: number }
 
-function Tile({ pv, state, digits }: { pv: PvDef | undefined; state: Record<string, unknown>; digits: number }) {
+// Below the first the measurement sequence waits (the backend says where that
+// is; this is its default). Below the second there is no beam at all.
+const BEAM_LOW_MA = 400
+const BEAM_NONE_MA = 10
+
+type Tone = { tone: 'warn' | 'alarm'; note?: string }
+
+function beamTone(value: unknown, lowMa: number): Tone | undefined {
+  if (typeof value !== 'number') return undefined
+  if (value < BEAM_NONE_MA) return { tone: 'alarm', note: 'No beam' }
+  if (value < lowMa) return { tone: 'warn' }
+  return undefined
+}
+
+/** One value: a number with its unit, or a state in words. */
+function Tile({
+  pv,
+  state,
+  digits = 0,
+  tone,
+  label,
+  wrap = false,
+}: {
+  pv: PvDef | undefined
+  state: Record<string, unknown>
+  digits?: number
+  tone?: (value: unknown) => Tone | undefined
+  /** instead of the label of the PV */
+  label?: string
+  /** a message: may run onto a second line */
+  wrap?: boolean
+}) {
   if (!pv) return null
   const entry = state[pv.key] as PvEntry | undefined
-  const known = entry !== undefined && typeof entry.value === 'number'
-  const stale = known && !entry.connected
+  const value = entry?.value
+  const known = typeof value === 'number' || typeof value === 'string'
+  const stale = known && entry?.connected !== true
+  const alert = known && !stale ? tone?.(value) : undefined
+  let className = 'tile'
+  if (stale || !known) className += ' tile-stale'
+  if (alert) className += ` tile-${alert.tone}`
   return (
-    <div className={stale || !known ? 'tile tile-stale' : 'tile'} title={stale ? 'Not connected: last value' : ''}>
-      <div className="tile-label">{pv.label}</div>
-      <div className="tile-value">
-        {known ? (entry.value as number).toFixed(digits) : '–'}
-        <span className="tile-unit"> {pv.unit}</span>
+    <div className={className} title={stale ? 'Not connected: last value' : ''}>
+      <div className="tile-label">{label ?? pv.label}</div>
+      <div className={wrap ? 'tile-value tile-wrap' : 'tile-value'} title={wrap && typeof value === 'string' ? value : undefined}>
+        {typeof value === 'number' ? value.toFixed(digits) : typeof value === 'string' ? value : '–'}
+        {pv.unit && <span className="tile-unit"> {pv.unit}</span>}
       </div>
+      {alert?.note && (
+        <div className="tile-note" role="status">
+          <span aria-hidden="true">⚠ </span>
+          {alert.note}
+        </div>
+      )}
     </div>
   )
 }
@@ -67,6 +110,7 @@ function App() {
   const mono = useMemo(() => pvs.filter((pv) => pv.plot && pv.group === 'mono'), [pvs])
   const control = state['control'] as ControlEntry | undefined
   const helm = state['helm'] as HelmEntry | undefined
+  const beam = state['beam'] as BeamEntry | undefined
   const iHold = me.user !== null && helm?.holder === me.user
 
   const [simulation, setSimulation] = useState(false)
@@ -142,10 +186,23 @@ function App() {
             height={PLOT_HEIGHT}
             colors={MONO_COLORS}
             digits={1}
+            minRange={0.1}
           />
           <div className="tiles">
-            <Tile pv={pvs.find((pv) => pv.name === 'SPEAR:BeamCurrAvg')} state={state} digits={1} />
-            <Tile pv={pvs.find((pv) => pv.name === 'BL22:SCAN:MASTER.RTME')} state={state} digits={0} />
+            <Tile
+              pv={pvs.find((pv) => pv.name === 'SPEAR:BeamCurrAvg')}
+              state={state}
+              digits={1}
+              tone={(value) => beamTone(value, beam?.low_ma ?? BEAM_LOW_MA)}
+            />
+            <Tile pv={pvs.find((pv) => pv.name === 'BL22:SCAN:MASTER.RTME')} state={state} />
+            <Tile pv={pvs.find((pv) => pv.name === 'BL22:SCAN:MASTER.TRIG')} state={state} />
+            <Tile
+              pv={pvs.find((pv) => pv.name === 'XSP3_7Chan:det1:StatusMessage_RBV')}
+              state={state}
+              label="XSPRESS status"
+              wrap
+            />
             <div className="segmented" role="group" aria-label="Time window of the plots">
               {WINDOWS_MIN.map((minutes) => (
                 <button

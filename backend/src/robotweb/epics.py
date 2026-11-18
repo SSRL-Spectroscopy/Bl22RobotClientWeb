@@ -34,7 +34,7 @@ class EpicsMonitor:
 
     def start(self) -> None:
         """Subscribe to every PV. Must be called from the running event loop."""
-        from aioca import FORMAT_TIME, camonitor
+        from aioca import DBR_CHAR_STR, FORMAT_TIME, camonitor
 
         now = time.time()
         for pv in self._pvs.values():
@@ -44,7 +44,8 @@ class EpicsMonitor:
                     pv.name,
                     self._on_update,
                     format=FORMAT_TIME,
-                    datatype=str if pv.enum else None,
+                    # enum: the state name; text: an array of characters as one string
+                    datatype=DBR_CHAR_STR if pv.text else str if pv.enum else None,
                     # Report every update for plotted PVs; for the others the
                     # latest value is enough.
                     all_updates=pv.plot,

@@ -18,7 +18,7 @@ from .api_commands import router as commands_router
 from .api_crystal import router as crystal_router
 from .beam import BeamWatch, pv_reader
 from .crystal import ChannelAccess, Crystal, CrystalError, Memory
-from .notify import Notifier, parse_addresses
+from .notify import from_settings as notifier_from_settings
 from .references import References
 from .science import Science
 from .api_samples import router as samples_router
@@ -108,6 +108,9 @@ async def lifespan(app: FastAPI):
         order=app.state.science.ordered,
         reference=lambda m: app.state.science.reference_foil(m["element"], m["edge"])[0],
     )
+    notifier = notifier_from_settings(runner, settings)
+    if notifier.problem:
+        log.error("no e-mails will be sent, the mail settings are wrong: %s", notifier.problem)
     # Without EPICS (tests, simulator) there is no SPEAR current to watch.
     beam = None
     if settings.epics_enabled:
@@ -131,7 +134,7 @@ async def lifespan(app: FastAPI):
         crystal=crystal,
         simulation=settings.simulation,
         beam=beam,
-        notifier=Notifier(runner, parse_addresses(settings.operator_emails)),
+        notifier=notifier,
         references=references,
     )
     app.state.sequences = sequences

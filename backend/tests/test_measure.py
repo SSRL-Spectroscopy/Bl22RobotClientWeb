@@ -554,7 +554,7 @@ async def test_the_run_waits_for_beam_and_mails_the_operators(beam_rig):
     rig.current = 500.0
     assert (await rig.finish())["state"] == "finished"
     assert [m.split()[3] for m in rig.mails()] == ["BL22HT_Run_waiting_for_beam"] * 2 + ["BL22HT_Run_resumed"] * 2
-    assert in_order(rig.log(), ["E-mail sent to the operators (BL22HT_Run_waiting_for_beam)",
+    assert in_order(rig.log(), ["E-mail sent to the operators through the control server (BL22HT_Run_waiting_for_beam)",
                                 "The beam is back: the run goes on.", "Move OPTIC_VERT to 73"])
     assert not any("example.org" in line for line in rig.log())  # addresses stay out of the log
     assert rig.status_in_portal("KQZ-TBW", M3) == "done"

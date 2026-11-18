@@ -19,10 +19,12 @@ type Props = {
   colors: string[]
   /** decimals in the legend values */
   digits: number
+  /** The vertical axis never shows less than this, so noise on a value at rest stays a flat line. */
+  minRange?: number
 }
 
 /** A rolling plot of one or more values against time. */
-export function RollingPlot({ title, pvs, windowMin, height, colors, digits }: Props) {
+export function RollingPlot({ title, pvs, windowMin, height, colors, digits, minRange }: Props) {
   const holder = useRef<HTMLDivElement>(null)
   const windowRef = useRef(windowMin)
   // Rebuild the plot when the colour scheme changes, to pick up the new colours.
@@ -56,7 +58,19 @@ export function RollingPlot({ title, pvs, windowMin, height, colors, digits }: P
       {
         width: element.clientWidth,
         height,
-        scales: { x: { time: true, auto: false } },
+        scales: {
+          x: { time: true, auto: false },
+          y: {
+            range: (_u, min, max) => {
+              if (min == null || max == null) return [0, 1]
+              if (minRange !== undefined && max - min < minRange) {
+                const middle = (min + max) / 2
+                return [middle - minRange / 2, middle + minRange / 2]
+              }
+              return uPlot.rangeNum(min, max, 0.1, true)
+            },
+          },
+        },
         axes: [axis, { ...axis, size: 62, label: unit, labelSize: 18 }],
         series: [
           { label: 'Time' },
@@ -109,7 +123,7 @@ export function RollingPlot({ title, pvs, windowMin, height, colors, digits }: P
       resize.disconnect()
       plot.destroy()
     }
-  }, [pvs, scheme, height, colors, digits])
+  }, [pvs, scheme, height, colors, digits, minRange])
 
   return (
     <div className="plot-tile" role="group" aria-label={title}>

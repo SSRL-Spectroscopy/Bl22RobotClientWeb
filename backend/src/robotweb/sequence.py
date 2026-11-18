@@ -42,6 +42,7 @@ from .control.client import ControlConnectionError
 from .control.protocol import ProtocolError
 from .equipment import FILTER, FRAME, ITEMS, REFERENCE, EquipmentState
 from .mqueue import MeasurementQueue
+from .notify import NotifyError
 from .outline import Outline, flat, public
 from .portal import PortalError
 from .runner import CommandFailed, CommandRunner
@@ -633,10 +634,10 @@ class SequenceEngine:
             return
         try:
             await self.notifier.send(subject, text)
-        except (CommandFailed, ControlConnectionError, ProtocolError) as exc:
+        except NotifyError as exc:
             self._log(f"The e-mail to the operators could not be sent: {exc}", "error")
         else:
-            self._log(f"E-mail sent to the operators ({subject})")
+            self._log(f"E-mail sent to the operators through {self.notifier.route} ({subject})")
 
     def _end(self, state: str, detail: str | None) -> None:
         self.runner.sequence_running = False

@@ -74,6 +74,17 @@ class Settings(BaseSettings):
     # Comma separated. Empty: no e-mails, the run log only.
     operator_emails: str = ""
 
+    # The mail server the e-mails go through (notify.py). Without a host they
+    # go through the control server instead. The password is a secret, like
+    # the API key. Security: starttls (port 587), ssl (port 465) or none
+    # (port 25, only without a user name).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_security: str = "starttls"
+    smtp_user: str = ""
+    smtp_password: SecretStr | None = None
+    smtp_from: str = ""
+
     # True when this backend talks to the simulated control server
     # (python -m robotweb.simulate). The page then shows a clear banner.
     simulation: bool = False

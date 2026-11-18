@@ -4,7 +4,9 @@ To add a PV, add a line here. "plot" keeps a history for it; "group" names
 the plot it is drawn in ("adc"); "enum" asks the IOC for the state name
 instead of the number; "show=False" is for PVs the backend needs for a value
 it works out (the inputs of the mono energy, see mono.py): the page lists them
-only in its Signals table; "exp" shows the value in exponential form (1e+9).
+only in its Signals table; "exp" shows the value in exponential form (1e+9);
+"text" is for a message stored as an array of characters (areaDetector's
+StatusMessage_RBV): it is read as one string.
 """
 
 from dataclasses import asdict, dataclass
@@ -22,6 +24,7 @@ class PvDef:
     group: str = ""
     show: bool = True
     exp: bool = False
+    text: bool = False
 
     @property
     def key(self) -> str:
@@ -44,7 +47,10 @@ PVS: tuple[PvDef, ...] = (
     PvDef("BL22:GAS.IC1P", "Ion chamber 1 gas pressure", "bar"),
     PvDef("BL22:GAS.IC2P", "Ion chamber 2 gas pressure", "bar"),
     PvDef("BL22:GAS.IC3P", "Ion chamber 3 gas pressure", "bar"),
-    PvDef("BL22:SCAN:MASTER.RTME", "Remaining time", "s"),
+    PvDef("BL22:SCAN:MASTER.RTME", "DAQ RTME", "s"),
+    PvDef("BL22:SCAN:MASTER.TRIG", "DAQ TRIGGER", enum=True),
+    PvDef("XSP3_7Chan:det1:DetectorState_RBV", "XSPRESS status", enum=True),
+    PvDef("XSP3_7Chan:det1:StatusMessage_RBV", "XSPRESS message", text=True),
     # Inputs of the mono energy.
     PvDef(f"{MONO_MOTOR}.REP", "Mono encoder", "counts", show=False),
     PvDef(f"{MONO_MOTOR}.UREV", "Mono units per revolution", "deg", show=False),
@@ -57,7 +63,7 @@ PVS: tuple[PvDef, ...] = (
 MONO_ENERGY_KEY = "mono.energy"
 MONO_ENERGY = {
     "name": "mono.energy", "key": MONO_ENERGY_KEY, "label": "Mono energy", "unit": "eV",
-    "plot": True, "enum": False, "group": "mono", "show": True, "exp": False,
+    "plot": True, "enum": False, "group": "mono", "show": True, "exp": False, "text": False,
 }
 
 
