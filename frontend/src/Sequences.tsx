@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { call, post } from './auth'
 import type { Me } from './auth'
-import { formatClock } from './format'
+import { formatClock, formatWhen } from './format'
 import type { HelmEntry } from './live'
 import { StepTree } from './StepTree'
 import type { StepNode } from './StepTree'
@@ -140,7 +140,13 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
             {status.icon}
           </span>
           <strong>{status.text}</strong>
-          {sequence.user && <> · started by {sequence.user}</>}
+          {sequence.user && (
+            <>
+              {' '}
+              · started by {sequence.user}
+              {sequence.started ? ` at ${formatWhen(sequence.started)}` : ''}
+            </>
+          )}
           {active && sequence.waiting && <span className="command-detail">{sequence.waiting}</span>}
           {active && !sequence.waiting && sequence.step && <span className="command-detail">Step: {sequence.step}</span>}
           {!active && sequence.detail && <span className="command-detail">{sequence.detail}</span>}
@@ -151,6 +157,7 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
             {sequence.state === 'running' && (
               <button
                 type="button"
+                className="warn"
                 disabled={sequence.pause_requested || sequence.abort_requested}
                 onClick={() => run(() => post('/api/sequence/pause'))}
               >
@@ -162,7 +169,12 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
                 Resume
               </button>
             )}
-            <button type="button" disabled={sequence.abort_requested} onClick={() => run(() => post('/api/sequence/abort'))}>
+            <button
+              type="button"
+              className="danger"
+              disabled={sequence.abort_requested}
+              onClick={() => run(() => post('/api/sequence/abort'))}
+            >
               Abort after this command
             </button>
           </div>

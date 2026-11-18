@@ -1486,3 +1486,26 @@ button.danger:not(:disabled) {
 .sequence-start button + .hint {
   margin-left: 0.5rem;
 }
+
+/* a button that holds a run up: amber while it can be pressed */
+button.warn:not(:disabled) {
+  background: #ffc933;
+  border-color: #b97f00;
+  color: #1c1400;
+  font-weight: 600;
+}
+
+/* The time window buttons in the top bar: three separate buttons with a gap,
+   not one joined strip. */
+.tiles .segmented {
+  gap: 0.4rem;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.tiles .segmented button,
+.tiles .segmented button + button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
