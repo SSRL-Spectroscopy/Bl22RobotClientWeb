@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { call, post } from './auth'
 import type { Me } from './auth'
 import { formatClock } from './format'
@@ -94,7 +94,6 @@ function Queue({
   setError: (message: string) => void
 }) {
   const items = queue?.items ?? []
-  const [reading, setReading] = useState(false)
 
   const run = async (action: () => Promise<unknown>) => {
     setError('')
@@ -115,12 +114,6 @@ function Queue({
   const clear = () => {
     if (window.confirm(`Remove all ${items.length} frame${items.length === 1 ? '' : 's'} from the queue?`))
       run(() => post('/api/queue/clear'))
-  }
-
-  const readReferences = async () => {
-    setReading(true)
-    await run(() => post('/api/references/read'))
-    setReading(false)
   }
 
   // Which foils the instrument has. null: not known, then nothing is marked.
@@ -167,13 +160,6 @@ function Queue({
             </span>
           )}
         </span>
-        {loggedIn && (
-          <span className="queue-actions">
-            <button type="button" disabled={reading} onClick={readReferences}>
-              {reading ? 'Reading…' : 'Read references'}
-            </button>
-          </span>
-        )}
       </div>
       {missing.length > 0 && (
         <p className="frame-problem" role="status">
@@ -305,8 +291,42 @@ function Queue({
 
 function TrashIcon() {
   return (
-    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.4">
-      <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.6 6.5v4.5M9.4 6.5v4.5" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      className="icon-trash"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+    >
+      <path
+        d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.6 6.5v4.5M9.4 6.5v4.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/** Two arrows chasing each other round a circle. */
+function RefreshIcon() {
+  return (
+    <svg
+      className="icon-refresh"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M13.2 6.5A5.5 5.5 0 0 0 3.3 5M2.8 9.5a5.5 5.5 0 0 0 9.9 1.5" />
+      <path d="M3 2.3V5h2.7M13 13.7V11h-2.7" />
     </svg>
   )
 }
@@ -491,9 +511,16 @@ export function Samples({ me, state }: { me: Me; state: Record<string, unknown> 
   const loaded = equipment?.items?.['reference']?.value
   const iHold = me.user !== null && helm?.holder === me.user
 
-  const load = async () => {
+  const loggedIn = me.user !== null
+
+  // Reads the frames from the portal and asks the instrument which reference
+  // foils it has. Both only read.
+  const load = useCallback(async () => {
     setLoading(true)
     setError('')
+    // The foils almost never change. If they cannot be read, the queue says
+    // "not checked" with the reason; no error banner for that.
+    post('/api/references/read').catch(() => undefined)
     try {
       const body = (await call('GET', '/api/samples')) as { frames: Frame[]; fetched: number }
       setFrames(body.frames)
@@ -503,7 +530,14 @@ export function Samples({ me, state }: { me: Me; state: Record<string, unknown> 
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  // Opening the Queue tab reads both at once (and so does logging in on it).
+  useEffect(() => {
+    if (!loggedIn) return
+    const timer = setTimeout(load, 0)
+    return () => clearTimeout(timer)
+  }, [loggedIn, load])
 
   return (
     <div className="tab-stack">
@@ -523,8 +557,15 @@ export function Samples({ me, state }: { me: Me; state: Record<string, unknown> 
           {me.user !== null && (
             <span className="queue-actions">
               {frames && <span className="hint">read at {formatClock(fetched)}</span>}
-              <button type="button" disabled={loading} onClick={load}>
-                {loading ? 'Reading…' : frames ? 'Read again' : 'Read from the portal'}
+              <button
+                type="button"
+                className="with-icon"
+                disabled={loading}
+                title="Read the frames from the portal and the reference foils from the instrument again"
+                onClick={load}
+              >
+                <RefreshIcon />
+                {loading ? 'Reading…' : 'Refresh'}
               </button>
             </span>
           )}

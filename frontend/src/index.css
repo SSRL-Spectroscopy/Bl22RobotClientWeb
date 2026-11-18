@@ -1449,3 +1449,24 @@ p.form-error::before {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+
+/* ---- icons with a meaning of their own ---- */
+
+button.with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.icon-refresh {
+  color: var(--good);
+}
+
+.icon-trash {
+  color: var(--critical);
+}
+
+button:disabled .icon-refresh,
+button:disabled .icon-trash {
+  color: var(--text-muted);
+}
