@@ -9,6 +9,10 @@ export type PvDef = {
   enum: boolean
   /** the plot it is drawn in: 'adc' or 'mono' */
   group: string
+  /** false for the inputs of a value the backend works out; listed in the Signals table only */
+  show: boolean
+  /** show the value in exponential form, such as 1e+9 */
+  exp?: boolean
 }
 
 /** The PV list from the backend. Retries until the backend answers. */

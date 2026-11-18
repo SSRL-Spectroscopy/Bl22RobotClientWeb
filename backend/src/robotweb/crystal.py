@@ -12,6 +12,7 @@ values last read.
 
 import logging
 import time
+from collections.abc import Callable
 from typing import Protocol
 
 from .audit import AuditLog
@@ -69,6 +70,9 @@ class Memory:
 class Crystal:
     def __init__(self, pvs: PvAccess, store: StateStore, audit: AuditLog, *, simulated: bool = False) -> None:
         self._pvs = pvs
+        # Called whenever the values were read or written, for what depends
+        # on the lattice spacing (the mono energy).
+        self.on_change: Callable[[], None] | None = None
         self._store = store
         self._audit = audit
         self._simulated = simulated
@@ -123,6 +127,8 @@ class Crystal:
         await self.reload()
 
     def _publish(self) -> None:
+        if self.on_change is not None:
+            self.on_change()
         self._store.publish(
             CRYSTAL_KEY,
             {

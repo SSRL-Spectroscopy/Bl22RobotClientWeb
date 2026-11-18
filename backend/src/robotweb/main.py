@@ -175,6 +175,9 @@ async def lifespan(app: FastAPI):
     epics = None
     if settings.epics_enabled:
         mono = MonoEnergy(store, lambda: crystal.d)
+        # The encoder does not report while the mono stands still: work the
+        # energy out again when the crystal values arrive or change.
+        crystal.on_change = mono.update
         epics = EpicsMonitor(store, PVS, on_update=mono.on_pv_update)
         epics.start()
 

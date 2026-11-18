@@ -131,7 +131,7 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
     })
 
   return (
-    <div className="columns">
+    <div className="columns overview">
     <section className="column" aria-label="Sequences">
       <h2>Sequences</h2>
       <div className="command-panel fill">

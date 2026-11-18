@@ -12,11 +12,13 @@ import { usePlotWindow, WINDOWS_MIN } from './plotWindow'
 import { RollingPlot } from './RollingPlot'
 import { Samples } from './Samples'
 import { Sequences } from './Sequences'
+import { Signals } from './Signals'
 import { Subsystems } from './Subsystems'
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'queue', label: 'Queue' },
+  { id: 'signals', label: 'Signals' },
   { id: 'manual', label: 'Manual control' },
   { id: 'settings', label: 'Settings' },
 ] as const
@@ -176,6 +178,7 @@ function App() {
         <main>
           {tab === 'overview' && <Sequences me={me} state={state} />}
           {tab === 'queue' && <Samples me={me} state={state} />}
+          {tab === 'signals' && <Signals pvs={pvs} state={state} />}
           {tab === 'manual' && <ManualControl me={me} state={state} />}
           {tab === 'settings' && (
             <>

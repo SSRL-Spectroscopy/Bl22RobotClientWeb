@@ -53,8 +53,28 @@ def test_energy_follows_encoder_offset_and_crystal():
     assert store.get(MONO_ENERGY_KEY)["connected"] is False
 
 
-def test_page_list_hides_the_inputs():
-    names = [entry["name"] for entry in page_list()]
-    assert "mono.energy" in names and REP not in names and OFFSET not in names
+async def test_energy_appears_when_the_crystal_is_read_after_the_encoder(tmp_path):
+    # after a restart the encoder may report once, before the crystal PVs are read
+    from robotweb.audit import AuditLog
+    from robotweb.crystal import Crystal, Memory
+
+    store = StateStore()
+    crystal = Crystal(Memory(), store, AuditLog(tmp_path / "audit.log"))
+    mono = MonoEnergy(store, lambda: crystal.d)
+    crystal.on_change = mono.update
+    for name, value in ((UREV, 360.0), (EREV, 31488000), (OFFSET, 10.74943090784472), (REP, 752519)):
+        put(store, name, value)
+    mono.on_pv_update(REP)
+    assert store.get(MONO_ENERGY_KEY)["value"] is None
+    await crystal.reload()
+    assert store.get(MONO_ENERGY_KEY)["value"] == pytest.approx(5965.975, abs=0.01)
+    await crystal.apply(1.9201, 90.0, user="alice")  # another crystal: another energy
+    assert store.get(MONO_ENERGY_KEY)["value"] == pytest.approx(9742.6, abs=1.0)
+
+
+def test_page_list_marks_the_inputs():
+    shown = {entry["name"]: entry["show"] for entry in page_list()}
+    assert shown["mono.energy"] and shown[REP] is False and shown[OFFSET] is False
+    assert not any(entry["plot"] for entry in page_list() if not entry["show"])
     groups = {entry["label"]: entry["group"] for entry in page_list() if entry["plot"]}
     assert groups == {"I_0": "adc", "I_1": "adc", "I_2": "adc", "PIPS": "adc", "Mono energy": "mono"}

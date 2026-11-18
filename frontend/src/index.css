@@ -1302,3 +1302,50 @@ p.form-error::before {
   content: '✕';
   color: var(--critical);
 }
+
+/* ---- overview: the sequence takes 60% of the width, the log 40% ---- */
+
+.columns.overview {
+  grid-template-columns: minmax(0, 6fr) minmax(0, 4fr);
+}
+
+/* ---- this window has control: wide diagonal stripes of amber and pale blue ---- */
+
+.app.has-control {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--page-control) 0,
+    var(--page-control) 90px,
+    var(--page-idle) 90px,
+    var(--page-idle) 180px
+  );
+}
+
+/* ---- signals table ---- */
+
+.signals {
+  max-width: 62rem;
+  font-size: 0.9rem;
+}
+
+.signals th,
+.signals td {
+  padding: 0.3rem 0.8rem;
+  white-space: nowrap;
+}
+
+.signals .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.signals td.number {
+  font-weight: 600;
+  /* a fixed width: a sign or one more digit must not move the other columns */
+  min-width: 8rem;
+}
+
+.signals .stale td.number,
+.signals .stale td {
+  color: var(--text-muted);
+}
