@@ -326,12 +326,33 @@ function Queries({ queries, state }: { queries: QueryDef[]; state: Record<string
   )
 }
 
-export function Commands({ me, state }: { me: Me; state: Record<string, unknown> }) {
-  const catalogue = useCatalogue()
+/** What the backend believes is loaded, and the controls to declare it. On the Settings page. */
+export function SampleHandling({ me, state }: { me: Me; state: Record<string, unknown> }) {
   const [error, setError] = useState('')
   const helm = state['helm'] as HelmEntry | undefined
   const command = state['command'] as CommandEntry | undefined
   const equipment = state['equipment'] as EquipmentEntry | undefined
+  const iHold = me.user !== null && helm?.holder === me.user
+  const running = command?.phase === 'starting' || command?.phase === 'running'
+  return (
+    <section aria-label="Sample handling">
+      <h2>Sample handling</h2>
+      <Equipment equipment={equipment} canAct={iHold && !running} setError={setError} />
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  )
+}
+
+/** Single commands and read-outs, sent by hand. */
+export function ManualControl({ me, state }: { me: Me; state: Record<string, unknown> }) {
+  const catalogue = useCatalogue()
+  const [error, setError] = useState('')
+  const helm = state['helm'] as HelmEntry | undefined
+  const command = state['command'] as CommandEntry | undefined
 
   const iHold = me.user !== null && helm?.holder === me.user
   const running = command?.phase === 'starting' || command?.phase === 'running'
@@ -343,10 +364,8 @@ export function Commands({ me, state }: { me: Me; state: Record<string, unknown>
   else if (!iHold) why = 'Take control to send commands.'
 
   return (
-    <section aria-label="Sample handling">
-      <h2>Sample handling</h2>
-      <Equipment equipment={equipment} canAct={iHold && !running} setError={setError} />
-
+    <section aria-label="Manual control">
+      <h2>Manual control</h2>
       <div className="command-panel">
         <CommandStatus command={command} />
         {why && <p className="hint">{why}</p>}

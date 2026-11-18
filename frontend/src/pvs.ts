@@ -7,6 +7,8 @@ export type PvDef = {
   unit: string
   plot: boolean
   enum: boolean
+  /** the plot it is drawn in: 'adc' or 'mono' */
+  group: string
 }
 
 /** The PV list from the backend. Retries until the backend answers. */

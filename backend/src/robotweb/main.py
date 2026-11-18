@@ -35,7 +35,8 @@ from .control import ControlClient
 from .control.poller import StatusPoller
 from .epics import EpicsMonitor
 from .helm import HelmManager
-from .pvs import PVS
+from .mono import MonoEnergy
+from .pvs import PVS, page_list
 from .state import StateStore
 
 log = logging.getLogger(__name__)
@@ -161,7 +162,8 @@ async def lifespan(app: FastAPI):
 
     epics = None
     if settings.epics_enabled:
-        epics = EpicsMonitor(store, PVS)
+        mono = MonoEnergy(store, lambda: crystal.d)
+        epics = EpicsMonitor(store, PVS, on_update=mono.on_pv_update)
         epics.start()
 
     yield
@@ -199,8 +201,9 @@ async def health() -> dict:
 
 @app.get("/api/pvs")
 async def pvs() -> list[dict]:
-    """The PVs on the status page, with labels, units and which ones are plotted."""
-    return [pv.as_dict() for pv in PVS]
+    """What the page shows: PVs with labels, units and the plot each belongs
+    to, and the mono energy the backend works out."""
+    return page_list()
 
 
 @app.websocket("/api/ws")

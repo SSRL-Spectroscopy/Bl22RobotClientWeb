@@ -375,23 +375,21 @@ export function Samples({ me, state }: { me: Me; state: Record<string, unknown> 
   }
 
   return (
-    <section aria-label="Measurement queue">
-      <h2>Measurement queue</h2>
-      <div className="command-panel">
-        <Queue queue={queue} loggedIn={me.user !== null} canAct={iHold} setError={setError} />
-      </div>
-
-      {me.user !== null && (
-        <div className="samples">
-          <div className="plot-head">
-            <h2>Frames in internal storage</h2>
+    <div className="columns">
+      <section className="column" aria-label="Frames in internal storage">
+        <div className="plot-head">
+          <h2>Frames in internal storage</h2>
+          {me.user !== null && (
             <span className="queue-actions">
               {frames && <span className="hint">read at {formatClock(fetched)}</span>}
               <button type="button" disabled={loading} onClick={load}>
                 {loading ? 'Reading…' : frames ? 'Read again' : 'Read from the portal'}
               </button>
             </span>
-          </div>
+          )}
+        </div>
+        <div className="column-scroll">
+          {me.user === null && <p className="hint">Log in as an operator to read the frames from the portal.</p>}
           {!iHold && frames && <p className="hint">Take control to change the queue.</p>}
           {frames && frames.length === 0 && <p className="hint">The portal lists no frames in internal storage.</p>}
           {frames?.map((frame) => (
@@ -404,13 +402,23 @@ export function Samples({ me, state }: { me: Me; state: Record<string, unknown> 
               setError={setError}
             />
           ))}
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
         </div>
-      )}
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
-    </section>
+      </section>
+      <section className="column" aria-label="Measurement queue">
+        <div className="plot-head">
+          <h2>Measurement queue</h2>
+        </div>
+        <div className="column-scroll">
+          <div className="command-panel">
+            <Queue queue={queue} loggedIn={me.user !== null} canAct={iHold} setError={setError} />
+          </div>
+        </div>
+      </section>
+    </div>
   )
 }

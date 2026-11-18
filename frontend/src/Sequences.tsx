@@ -73,7 +73,7 @@ function RunLog({ lines }: { lines: LogLine[] }) {
     // keep the newest line in view
     if (box.current) box.current.scrollTop = box.current.scrollHeight
   }, [lines.length])
-  if (lines.length === 0) return null
+  if (lines.length === 0) return <p className="hint">Nothing logged yet.</p>
   return (
     <div className="run-log" ref={box} role="log" aria-label="Run log">
       {lines.map((line, index) => (
@@ -131,9 +131,10 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
     })
 
   return (
-    <section aria-label="Sequences">
+    <div className="columns">
+    <section className="column" aria-label="Sequences">
       <h2>Sequences</h2>
-      <div className="command-panel">
+      <div className="command-panel fill">
         <p className={`command-status phase-${status.kind}`} role="status">
           <span className="status-icon" aria-hidden="true">
             {status.icon}
@@ -210,8 +211,14 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
         {sequence.state !== 'idle' && (
           <StepTree nodes={outline} label={active ? 'Steps' : `Steps of the last run: ${sequence.label ?? ''}`} />
         )}
+      </div>
+    </section>
+    <section className="column" aria-label="Log">
+      <h2>Log</h2>
+      <div className="command-panel fill">
         <RunLog lines={sequence.log ?? []} />
       </div>
     </section>
+    </div>
   )
 }

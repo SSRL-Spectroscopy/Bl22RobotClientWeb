@@ -64,8 +64,29 @@ Initial PVs:
 | `BL22:SCAN:MASTER:ADC3` | V | I_2 |
 | `BL22:SCAN:MASTER:ADC4` | V | PIPS |
 | `SPEAR:BeamCurrAvg` | mA | SPEAR current |
-| `BL22:SCAN:MASTER.TRIG` | | DAQ trigger status |
 | `BL22:SCAN:MASTER.RTME` | s | Remaining time |
+| `BL22:SCAN:MASTER:MOTOR1.REP` | counts | Mono encoder (raw) |
+| `BL22:SCAN:MASTER:MOTOR1.UREV`, `.EREV` | | Units and encoder counts per revolution (constant) |
+| `BL22:STORE:CRYSTAL_ENCODER_OFFSET` | deg | Encoder offset; changes at every energy calibration |
+
+The crystal PVs (`BL22:STORE:...`) are served from 192.168.22.5:6064, which must be in `EPICS_CA_ADDR_LIST` of the process that runs the backend.
+
+### Mono energy
+
+The page plots the mono energy. The backend works it out from the encoder (`backend/src/robotweb/mono.py`):
+
+    Bragg angle [deg] = REP x (UREV / EREV) + offset
+    energy [eV]       = 12398.42 / (2 d sin(angle))
+
+`d` is the lattice spacing from `BL22:STORE:CRYSTAL_D`, as last read by the crystal panel. The value is for display only; sequences ask the control server for the mono energy.
+
+## The page
+
+Desktop monitors only.
+
+- **Page colour.** Amber while this window has control, pale blue otherwise. Red stays reserved for errors.
+- **Top bar, always visible.** Connection and subsystem status, who has control with the button to take, request or release it, and the login. Below that two rolling plots that share one time window: the ion chambers and PIPS (three quarters of the width) and the mono energy. Two tiles show the SPEAR current and the remaining scan time. A request for control from another operator, the simulation notice and a lost connection appear as strips in the bar.
+- **Side tabs.** Overview (the sequence with its step tree, and the log next to it), Queue (frames in internal storage and the measurement queue next to each other, each with its own scroll bar), Manual control (single commands and read-outs), Settings (the crystal and the record of what is loaded).
 
 ## Authentication and roles
 

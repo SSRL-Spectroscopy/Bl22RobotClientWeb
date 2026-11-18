@@ -4,43 +4,32 @@ import 'uplot/dist/uPlot.min.css'
 import { live } from './live'
 import type { PvDef } from './pvs'
 
-const WINDOWS_MIN = [1, 2, 5]
 const REDRAW_MS = 250
-const HEIGHT = 300
-const STORAGE_KEY = 'plotWindowMin'
-
-// Series colours are assigned by position and come from CSS (--series-1..3),
-// so light and dark mode each get their own validated step.
-const SERIES_VARS = ['--series-1', '--series-2', '--series-3']
 
 function cssVar(element: Element, name: string): string {
   return getComputedStyle(element).getPropertyValue(name).trim()
 }
 
-function readStoredWindow(): number {
-  try {
-    const stored = Number(localStorage.getItem(STORAGE_KEY))
-    if (WINDOWS_MIN.includes(stored)) return stored
-  } catch {
-    // storage unavailable; fall through to the default
-  }
-  return 2
+type Props = {
+  title: string
+  pvs: PvDef[]
+  windowMin: number
+  height: number
+  /** CSS variables with the series colours, by position. Light and dark mode each have their own step. */
+  colors: string[]
+  /** decimals in the legend values */
+  digits: number
 }
 
-export function RollingPlot({ pvs }: { pvs: PvDef[] }) {
+/** A rolling plot of one or more values against time. */
+export function RollingPlot({ title, pvs, windowMin, height, colors, digits }: Props) {
   const holder = useRef<HTMLDivElement>(null)
-  const [windowMin, setWindowMin] = useState(readStoredWindow)
   const windowRef = useRef(windowMin)
   // Rebuild the plot when the colour scheme changes, to pick up the new colours.
   const [scheme, setScheme] = useState(0)
 
   useEffect(() => {
     windowRef.current = windowMin
-    try {
-      localStorage.setItem(STORAGE_KEY, String(windowMin))
-    } catch {
-      // not being able to remember the choice is harmless
-    }
   }, [windowMin])
 
   useEffect(() => {
@@ -66,18 +55,18 @@ export function RollingPlot({ pvs }: { pvs: PvDef[] }) {
     const plot = new uPlot(
       {
         width: element.clientWidth,
-        height: HEIGHT,
+        height,
         scales: { x: { time: true, auto: false } },
-        axes: [axis, { ...axis, size: 70, label: unit, labelSize: 20 }],
+        axes: [axis, { ...axis, size: 62, label: unit, labelSize: 18 }],
         series: [
           { label: 'Time' },
           ...pvs.map((pv, i) => ({
             label: pv.label,
-            stroke: cssVar(element, SERIES_VARS[i % SERIES_VARS.length]),
+            stroke: cssVar(element, colors[i % colors.length]),
             width: 2,
             spanGaps: true,
             points: { show: false },
-            value: (_: uPlot, v: number | null) => (v == null ? '–' : `${v.toFixed(5)} ${unit}`),
+            value: (_: uPlot, v: number | null) => (v == null ? '–' : `${v.toFixed(digits)} ${unit}`),
           })),
         ],
         cursor: { drag: { x: false, y: false } },
@@ -90,7 +79,7 @@ export function RollingPlot({ pvs }: { pvs: PvDef[] }) {
     const redraw = () => {
       const now = live.serverNow()
       const from = now - windowRef.current * 60
-      // Each PV has its own timestamps; join them onto one time axis.
+      // Each value has its own timestamps; join them onto one time axis.
       const tables = pvs.map((pv) => {
         const series = live.history.get(pv.key) ?? { t: [], v: [] }
         let start = 0
@@ -111,7 +100,7 @@ export function RollingPlot({ pvs }: { pvs: PvDef[] }) {
     redraw()
     const timer = setInterval(redraw, REDRAW_MS)
     const resize = new ResizeObserver(() => {
-      plot.setSize({ width: element.clientWidth, height: HEIGHT })
+      plot.setSize({ width: element.clientWidth, height })
     })
     resize.observe(element)
 
@@ -120,26 +109,12 @@ export function RollingPlot({ pvs }: { pvs: PvDef[] }) {
       resize.disconnect()
       plot.destroy()
     }
-  }, [pvs, scheme])
+  }, [pvs, scheme, height, colors, digits])
 
   return (
-    <section aria-label="Ion chamber signals">
-      <div className="plot-head">
-        <h2>Ion chambers</h2>
-        <div className="segmented" role="group" aria-label="Time window">
-          {WINDOWS_MIN.map((minutes) => (
-            <button
-              key={minutes}
-              type="button"
-              aria-pressed={minutes === windowMin}
-              onClick={() => setWindowMin(minutes)}
-            >
-              {minutes} min
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className="plot-tile" role="group" aria-label={title}>
+      <div className="plot-title">{title}</div>
       <div className="plot" ref={holder} />
-    </section>
+    </div>
   )
 }

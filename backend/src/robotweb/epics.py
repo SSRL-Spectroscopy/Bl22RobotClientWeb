@@ -7,7 +7,7 @@ rest of the backend and its tests run without Channel Access.
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from .pvs import PvDef
 from .state import StateStore
@@ -16,8 +16,18 @@ log = logging.getLogger(__name__)
 
 
 class EpicsMonitor:
-    def __init__(self, store: StateStore, pvs: Sequence[PvDef], *, connect_timeout_s: float = 5.0) -> None:
+    def __init__(
+        self,
+        store: StateStore,
+        pvs: Sequence[PvDef],
+        *,
+        connect_timeout_s: float = 5.0,
+        on_update: Callable[[str], None] | None = None,
+    ) -> None:
+        """`on_update` is called with the PV name after each published update
+        (also a disconnect), for values worked out from PVs."""
         self._store = store
+        self._notify = on_update
         self._pvs = {pv.name: pv for pv in pvs}
         self._connect_timeout_s = connect_timeout_s
         self._subscriptions: list = []
@@ -57,6 +67,8 @@ class EpicsMonitor:
             # Disconnected, or never connected within the timeout.
             previous = self._store.get(pv.key)
             self._store.publish(pv.key, _disconnected(previous, time.time()))
+            if self._notify is not None:
+                self._notify(pv.name)
             return
 
         ts = float(getattr(value, "timestamp", None) or time.time())
@@ -72,6 +84,8 @@ class EpicsMonitor:
         )
         if pv.plot and isinstance(plain, (int, float)):
             self._store.add_sample(pv.key, ts, float(plain))
+        if self._notify is not None:
+            self._notify(pv.name)
 
 
 def _disconnected(previous: dict | None, now: float) -> dict:

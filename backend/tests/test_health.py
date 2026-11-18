@@ -16,5 +16,6 @@ def test_pv_list():
     with TestClient(app) as http:
         pvs = http.get("/api/pvs").json()
     plotted = [pv["label"] for pv in pvs if pv["plot"]]
-    assert plotted == ["I_0", "I_1", "I_2"]
-    assert all(pv["key"] == f"pv.{pv['name']}" for pv in pvs)
+    assert plotted == ["I_0", "I_1", "I_2", "PIPS", "Mono energy"]
+    assert all(pv["key"] == f"pv.{pv['name']}" for pv in pvs if pv["name"] != "mono.energy")
+    assert "DAQ trigger" not in [pv["label"] for pv in pvs]
