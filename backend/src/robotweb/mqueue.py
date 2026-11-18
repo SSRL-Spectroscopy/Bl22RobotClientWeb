@@ -21,6 +21,7 @@ _PUBLIC_MEASUREMENT_FIELDS = (
     "id", "position", "plate_type", "number", "technique", "element", "edge", "detection", "beam", "state",
     "status",
 )
+# Added for the page: the reference foil the measurement needs.
 
 # Portal statuses that may be queued. "done" and "error" mean the measurement
 # is run again; the sequence must set it back to "pending" in the portal first,
@@ -40,6 +41,7 @@ class MeasurementQueue:
         audit: AuditLog,
         *,
         order: Callable[[list[dict]], list[dict]] | None = None,
+        reference: Callable[[dict], str] | None = None,
     ) -> None:
         """`order` puts a frame's measurements in the order the measurement
         sequence runs them (Science.ordered), so that the queue reads from top
@@ -48,6 +50,8 @@ class MeasurementQueue:
         self._store = store
         self._audit = audit
         self._order = order
+        # Names the reference foil a measurement needs (Science.reference_foil).
+        self._reference = reference
         self._items: list[dict] = []
         self._load()
         for item in self._items:  # a queue saved by an older version
@@ -161,6 +165,32 @@ class MeasurementQueue:
                     self._save()
                     return
 
+    def remove_measurement(self, barcode: str, measurement_id: str, *, user: str) -> None:
+        """Take one measurement out of the queue. A frame whose last
+        measurement goes is removed with it."""
+        barcode = barcode.upper()
+        item = next((i for i in self._items if i["barcode"] == barcode), None)
+        if item is None:
+            raise QueueError(f"Frame {barcode} is not in the queue.")
+        measurement = next((m for m in item["measurements"] if m["id"] == measurement_id), None)
+        if measurement is None:
+            raise QueueError(f"Frame {barcode} has no queued measurement {measurement_id}.")
+        if measurement.get("state") in ("running", "uploaded"):
+            raise QueueError("This measurement is being measured right now.")
+        item["measurements"] = [m for m in item["measurements"] if m["id"] != measurement_id]
+        if not item["measurements"]:
+            self._items = [i for i in self._items if i["barcode"] != barcode]
+        self._audit.write("queue_measurement_removed", user=user, barcode=barcode, measurement=measurement_id)
+        self._save()
+
+    def _reference_of(self, measurement: dict) -> str | None:
+        if self._reference is None:
+            return None
+        try:
+            return self._reference(measurement)
+        except Exception:  # noqa: BLE001  an element the tables do not know
+            return None
+
     def clear(self, *, user: str) -> None:
         self._items = []
         self._audit.write("queue_cleared", user=user)
@@ -195,7 +225,8 @@ class MeasurementQueue:
                 "state": item["state"],
                 "note": item.get("note"),
                 "measurements": [
-                    {field: m.get(field) for field in _PUBLIC_MEASUREMENT_FIELDS} for m in item["measurements"]
+                    {**{field: m.get(field) for field in _PUBLIC_MEASUREMENT_FIELDS}, "reference": self._reference_of(m)}
+                    for m in item["measurements"]
                 ],
             }
             for item in self._items

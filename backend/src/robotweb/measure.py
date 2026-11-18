@@ -105,6 +105,7 @@ def check(engine: "SequenceEngine") -> None:
     frames = _frames_to_run(engine.queue.items)
     if not frames:
         raise MeasureError("The queue holds no measurements to run.")
+    foils: set[str] = set()
     for item in frames:
         try:
             measurements = engine.science.ordered(_open_measurements(item))
@@ -112,10 +113,17 @@ def check(engine: "SequenceEngine") -> None:
             raise MeasureError(f"Frame {item['barcode']}: {exc}.") from exc
         for m in measurements:
             try:
-                engine.science.setup(m, cut)
+                foils.add(engine.science.setup(m, cut).foil_element)
             except ScienceError as exc:
                 raise MeasureError(f"{describe(m)}: {exc}.") from exc
             place_argument(m)
+    if engine.references is not None:
+        missing = sorted(foil for foil in foils if engine.references.is_missing(foil))
+        if missing:
+            raise MeasureError(
+                f"The instrument has no reference foil for: {', '.join(missing)}. Remove the measurements "
+                "that need it from the queue, or load the foil and read the references again."
+            )
 
 
 def _title(m: dict, s: Setup) -> str:

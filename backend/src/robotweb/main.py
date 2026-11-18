@@ -19,6 +19,7 @@ from .api_crystal import router as crystal_router
 from .beam import BeamWatch, pv_reader
 from .crystal import ChannelAccess, Crystal, CrystalError, Memory
 from .notify import Notifier, parse_addresses
+from .references import References
 from .science import Science
 from .api_samples import router as samples_router
 from .api_sequence import router as sequence_router
@@ -98,7 +99,15 @@ async def lifespan(app: FastAPI):
 
     portal = PortalClient(settings.bl22_api_url, settings.bl22_api_key)
     app.state.portal = portal
-    app.state.queue = MeasurementQueue(settings.queue_file, store, audit, order=app.state.science.ordered)
+    references = References(runner, store, equipment)
+    app.state.references = references
+    app.state.queue = MeasurementQueue(
+        settings.queue_file,
+        store,
+        audit,
+        order=app.state.science.ordered,
+        reference=lambda m: app.state.science.reference_foil(m["element"], m["edge"])[0],
+    )
     # Without EPICS (tests, simulator) there is no SPEAR current to watch.
     beam = None
     if settings.epics_enabled:
@@ -123,6 +132,7 @@ async def lifespan(app: FastAPI):
         simulation=settings.simulation,
         beam=beam,
         notifier=Notifier(runner, parse_addresses(settings.operator_emails)),
+        references=references,
     )
     app.state.sequences = sequences
 
@@ -138,6 +148,8 @@ async def lifespan(app: FastAPI):
 
     tasks = [
         asyncio.create_task(read_crystal(), name="crystal-read"),
+        # In the background: an unreachable control server must not delay the start.
+        asyncio.create_task(references.refresh(), name="references-read"),
         asyncio.create_task(store.run(), name="state-flush"),
         asyncio.create_task(helm_clock(), name="helm-clock"),
     ]

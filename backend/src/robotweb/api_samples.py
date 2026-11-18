@@ -68,6 +68,28 @@ async def queue_set_frame(
         queue.set_frame(frame, body.measurement_ids, user=session.user)
     except QueueError as exc:
         raise HTTPException(409, str(exc)) from exc
+    # The page marks queued measurements whose reference foil is missing:
+    # read what the instrument has now.
+    await state.references.refresh()
+    return {"ok": True}
+
+
+@router.post("/references/read", dependencies=[Depends(same_origin)])
+async def read_references(request: Request, session: Session = Depends(require_operator)) -> dict:
+    """Ask the control server which reference foils it has (SAMPLE LIST_REF)."""
+    references = request.app.state.references
+    await references.refresh()
+    return {"available": references.available, "error": references.error}
+
+
+@router.delete("/queue/frames/{barcode}/measurements/{measurement_id}", dependencies=[Depends(same_origin)])
+async def queue_remove_measurement(
+    barcode: str, measurement_id: str, request: Request, session: Session = Depends(require_helm)
+) -> dict:
+    try:
+        request.app.state.queue.remove_measurement(barcode, measurement_id, user=session.user)
+    except QueueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     return {"ok": True}
 
 

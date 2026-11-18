@@ -26,6 +26,11 @@ export async function call(method: string, path: string, body?: unknown): Promis
   }
   const data = await response.json().catch(() => null)
   if (!response.ok) {
+    // 405 comes from a backend that does not have the function the page asks
+    // for: the page files are newer than the running backend.
+    if (response.status === 405) {
+      throw new Error('This backend does not know that function. It runs an older version and has to be restarted.')
+    }
     const detail = data && typeof data.detail === 'string' ? data.detail : `Request failed (${response.status}).`
     throw new Error(detail)
   }

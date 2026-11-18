@@ -217,6 +217,18 @@ Decisions (2026-11-17):
 - `BOT_VERT` moves with the robot: when the robot holds a frame in the beam, `BOT_VERT` is already in the range the detector rules need.
 - `SAMPLE PLACE` takes `<plate> <side> <number> <fy>`, for example `8-CIRCLE LEFT 1 TRUE` (from `ParseApiSamplePosition_2`): sample A is 1, H is 8, and `<fy>` is `TRUE` for TFY and SDD detection. Only the plate types `8-circle` and `8-slot` are defined. A queue with a sample on another plate type (`8-circle-gas`) is refused before anything moves.
 
+### Reference foils the instrument has
+
+`SAMPLE LIST_REF` lists the reference foils that are available (`backend/src/robotweb/references.py`). The backend reads it at start, whenever a frame is added to the queue, before the measurement sequence is planned or started, and on the "Read references" button.
+
+- The queue names the foil each measurement needs. A measurement whose foil is not in the list is marked in the queue, and a line above the table says which foils are missing.
+- The measurement sequence refuses to start while a queued measurement needs a missing foil.
+- The foil that is loaded at the moment counts as available.
+- If the list cannot be read (control server away, or one without the command), it is unknown: nothing is marked and the start is not refused.
+- **Assumption, not yet checked against the control server:** the answer's data lines hold the names separated by spaces, commas or line breaks, written as `SAMPLE GET_REF` takes them. Names are compared without regard to case.
+
+Single measurements can be removed from the queue; a frame whose last measurement goes is removed with it.
+
 ### Waiting for beam
 
 `backend/src/robotweb/beam.py` watches the SPEAR current (`SPEAR:BeamCurrAvg`, already monitored for the status page). Decided 2026-11-17:

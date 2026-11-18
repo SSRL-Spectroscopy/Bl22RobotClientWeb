@@ -21,6 +21,13 @@ def _do(action) -> dict:
     return {"ok": True}
 
 
+async def _read_references(name: str, request: Request) -> None:
+    """The measurement sequence refuses to start while a reference foil it
+    needs is missing, so it must judge by what the instrument has now."""
+    if name == "measure" and not _engine(request).active:
+        await request.app.state.references.refresh()
+
+
 @router.get("/sequences")
 async def list_sequences() -> list[dict]:
     return [{"name": s.name, "label": s.label, "description": s.description} for s in SEQUENCES.values()]
@@ -32,6 +39,7 @@ async def plan(name: str, request: Request, session: Session = Depends(require_o
     ("outline") and as indented text ("steps")."""
     if name not in SEQUENCES:
         raise HTTPException(404, f"Unknown sequence {name!r}.")
+    await _read_references(name, request)
     try:
         engine = _engine(request)
         return {"outline": engine.outline(name), "steps": engine.plan(name)}
@@ -43,6 +51,7 @@ async def plan(name: str, request: Request, session: Session = Depends(require_o
 async def start(name: str, request: Request, session: Session = Depends(require_helm)) -> dict:
     if name not in SEQUENCES:
         raise HTTPException(404, f"Unknown sequence {name!r}.")
+    await _read_references(name, request)
     return _do(lambda: _engine(request).start(name, user=session.user))
 
 

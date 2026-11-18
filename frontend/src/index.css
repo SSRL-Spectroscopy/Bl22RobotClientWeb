@@ -19,6 +19,8 @@
 
   /* the page: amber while this window has control, pale blue otherwise */
   --page-control: #fbe6b4;
+  /* input fields: solid, whatever the page colour is */
+  --field: #ffffff;
   --page-idle: #e3eef9;
 
   /* status: always shown with an icon and a label, never colour alone */
@@ -47,6 +49,7 @@
     --series-4: #c98500;
     --series-mono: #9085e9;
     --page-control: #3d2f08;
+    --field: #2a2a28;
     --page-idle: #0e1b2b;
     --running: #3987e5;
     --done-bg: #173a1c;
@@ -1170,4 +1173,132 @@ main > section:first-child,
   flex: 1;
   min-height: 0;
   max-height: none;
+}
+
+/* Input fields have a solid background of their own. They used the page
+   colour, which made them look transparent on the amber or blue page. */
+.app input:not([type='checkbox']),
+.app select,
+.app textarea {
+  background: var(--field);
+  color: var(--text);
+  border: 1px solid var(--text-muted);
+  border-radius: 6px;
+}
+
+.app input:disabled,
+.app select:disabled {
+  background: var(--grid);
+  color: var(--text-secondary);
+}
+
+/* ---- the measurement queue as a compact table ---- */
+
+.queue-references {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.queue-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.queue-table th,
+.queue-table td {
+  text-align: left;
+  padding: 0.12rem 0.5rem 0.12rem 0.3rem;
+  white-space: nowrap;
+}
+
+.queue-table thead th {
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.queue-table td {
+  border-top: 1px solid var(--grid);
+}
+
+.queue-frame th {
+  padding-top: 0.5rem;
+  font-weight: 400;
+  border-top: 1px solid var(--border);
+}
+
+.queue-table tbody:first-of-type .queue-frame th {
+  border-top: 0;
+}
+
+.queue-table .done td {
+  background: var(--done-bg);
+}
+
+.queue-table .blocked td {
+  background: var(--blocked-bg);
+}
+
+.queue-remove {
+  width: 1%;
+  text-align: right;
+}
+
+button.icon {
+  padding: 0.1rem 0.35rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---- error messages: hard to miss ---- */
+
+/* A tab with a message above its columns. */
+.tab-stack {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+}
+
+.tab-stack > .columns {
+  flex: 1;
+  height: auto;
+}
+
+.error-banner,
+p.form-error {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.5rem 0 0;
+  padding: 0.45rem 0.8rem;
+  border: 2px solid var(--critical);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.error-banner {
+  flex: none;
+  margin: 0;
+}
+
+.error-banner > span:first-child {
+  color: var(--critical);
+}
+
+.error-banner button {
+  margin-left: auto;
+  font-weight: 400;
+}
+
+p.form-error::before {
+  content: '✕';
+  color: var(--critical);
 }

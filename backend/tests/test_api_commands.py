@@ -80,7 +80,7 @@ def wait_idle(http, seconds: float = 5) -> dict:
 
 
 def sent(control) -> list[str]:
-    return [r for r in control.requests if not r.endswith(("GET_STATUS", "GET_SAMPLE_STORAGE_SLOTS"))]
+    return [r for r in control.requests if not r.endswith(("GET_STATUS", "GET_SAMPLE_STORAGE_SLOTS", "LIST_REF"))]
 
 
 def test_command_list_is_public(http):

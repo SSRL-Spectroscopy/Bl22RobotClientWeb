@@ -55,6 +55,10 @@ class FakeControlServer:
     host: str = "127.0.0.1"
     port: int = 0  # 0 = let the OS pick a free port
     busy_s: float = 0.3  # how long a start command keeps its subsystem busy
+    # The reference foils SAMPLE LIST_REF reports.
+    references: list = field(
+        default_factory=lambda: "Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Zr Nb Mo Ta W Pt Au".split()
+    )
     # (subsystem, verb) -> seconds, for start commands that take longer or shorter.
     slow: dict = field(default_factory=dict)
     # Send the response in two pieces with a pause, to exercise the reader.
@@ -212,6 +216,9 @@ class FakeControlServer:
 
         if (subsystem, verb) == ("BEAMLINE", "GET_GAIN"):
             return [head, "1x1e9_V/A 1x1e9_V/A 1x1e9_V/A 1x1e9_V/A"]
+
+        if (subsystem, verb) == ("SAMPLE", "LIST_REF"):
+            return [head, " ".join(self.references)]
 
         if (subsystem, verb) == ("SAMPLE", "GET_SAMPLE_STORAGE_SLOTS"):
             return [head, *self.slots]

@@ -439,10 +439,12 @@ class SequenceEngine:
         simulation: bool = False,
         beam=None,
         notifier=None,
+        references=None,
         beam_poll_s: float = 1.0,
     ) -> None:
         self.beam = beam
         self.notifier = notifier
+        self.references = references
         self._beam_poll_s = beam_poll_s
         self.portal = portal
         self.science = science
