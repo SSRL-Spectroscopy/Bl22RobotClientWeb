@@ -669,6 +669,28 @@ class SequenceEngine:
         else:
             self._log(f"E-mail sent to the operators through {self.notifier.route} ({subject})")
 
+    async def announce(self, subject: str, text: str, *, level: str = "error") -> None:
+        """Tell the operators something that is not a step of a run (the
+        control server does not answer): in the run log while a run is
+        active, and by e-mail. Only through the mail server: a message handed
+        to the control server would wait behind the request that is stuck."""
+        running = self.active
+        if running:
+            self._log(text, level)
+        notifier = self.notifier
+        if notifier is None or not notifier.addresses or notifier.smtp is None:
+            log.warning("no e-mail sent (%s): no operator address or no mail server", subject)
+            return
+        try:
+            await notifier.send(subject, text)
+        except NotifyError as exc:
+            log.error("the e-mail to the operators could not be sent (%s): %s", subject, exc)
+            if running:
+                self._log(f"The e-mail to the operators could not be sent: {exc}", "error")
+        else:
+            if running:
+                self._log(f"E-mail sent to the operators through {notifier.route} ({subject})")
+
     def _end(self, state: str, detail: str | None) -> None:
         self.runner.sequence_running = False
         self._status.update(state=state, detail=detail, step=None, waiting=None, finished=time.time())

@@ -95,6 +95,43 @@ function ExchangeLogSwitch({
   )
 }
 
+type LongWaitEntry = { enabled: boolean; max_wait_s: number; warn_after_s: number }
+
+/** Switches the long wait for the control server on and off. Only the
+ *  operator at the helm can change it. */
+function LongWaitSwitch({
+  entry,
+  canChange,
+  onChange,
+}: {
+  entry: LongWaitEntry | undefined
+  canChange: boolean
+  onChange: (enabled: boolean) => void
+}) {
+  const on = entry?.enabled === true
+  const minutes = Math.round((entry?.max_wait_s ?? 3600) / 60)
+  const warn = Math.round(entry?.warn_after_s ?? 60)
+  return (
+    <label
+      className="switch"
+      title={
+        `For when the control server is stopped at a breakpoint: wait up to ${minutes} min for an answer ` +
+        `instead of giving up after a few seconds. The operators get an e-mail after ${warn} s without an answer.` +
+        (canChange ? '' : ' Take control to change it.')
+      }
+    >
+      <input
+        type="checkbox"
+        role="switch"
+        checked={on}
+        disabled={!canChange}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      Wait up to {minutes} min for the control server
+    </label>
+  )
+}
+
 function RunLog({ lines }: { lines: LogLine[] }) {
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -160,10 +197,17 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
     })
 
   const exchangeSwitch = (
-    <ExchangeLogSwitch
-      entry={exchange}
-      onChange={(enabled) => run(() => post('/api/exchange-log', { enabled }))}
-    />
+    <>
+      <ExchangeLogSwitch
+        entry={exchange}
+        onChange={(enabled) => run(() => post('/api/exchange-log', { enabled }))}
+      />
+      <LongWaitSwitch
+        entry={state['long_wait'] as LongWaitEntry | undefined}
+        canChange={iHold}
+        onChange={(enabled) => run(() => post('/api/long-wait', { enabled }))}
+      />
+    </>
   )
 
   return (

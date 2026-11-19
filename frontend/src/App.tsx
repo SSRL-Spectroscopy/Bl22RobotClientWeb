@@ -3,6 +3,7 @@ import { useAuth } from './auth'
 import { ManualControl, SampleHandling } from './Commands'
 import { Crystal } from './Crystal'
 import { HelmButton, HelmNotice } from './Helm'
+import { formatWhen } from './format'
 import { useLive } from './live'
 import type { ControlEntry, HelmEntry } from './live'
 import { Login } from './Login'
@@ -109,6 +110,9 @@ function App() {
   const adc = useMemo(() => pvs.filter((pv) => pv.plot && pv.group === 'adc'), [pvs])
   const mono = useMemo(() => pvs.filter((pv) => pv.plot && pv.group === 'mono'), [pvs])
   const control = state['control'] as ControlEntry | undefined
+  const longWait = state['long_wait'] as
+    | { max_wait_s: number; waiting: { command: string; since: number } | null }
+    | undefined
   const helm = state['helm'] as HelmEntry | undefined
   const beam = state['beam'] as BeamEntry | undefined
   const iHold = me.user !== null && helm?.holder === me.user
@@ -161,6 +165,13 @@ function App() {
         {simulation && (
           <p className="strip strip-simulation" role="status">
             <strong>Simulation.</strong> The control server is simulated: nothing on the beamline moves.
+          </p>
+        )}
+        {longWait?.waiting && (
+          <p className="strip strip-waiting" role="alert">
+            <strong>The control server is not answering.</strong> No answer to "{longWait.waiting.command}" since{' '}
+            {formatWhen(longWait.waiting.since)}. The backend waits up to {Math.round(longWait.max_wait_s / 60)} min. If
+            the control server is stopped at a breakpoint, let it go on.
           </p>
         )}
         {link !== 'open' && (

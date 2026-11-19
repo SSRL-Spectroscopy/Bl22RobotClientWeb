@@ -7,6 +7,7 @@ reopened after any failure.
 
 import asyncio
 import logging
+import time
 
 from .protocol import (
     RESPONSE_TERMINATOR,
@@ -32,14 +33,18 @@ class ControlClient:
         response_timeout_s: float = 10.0,
         name: str = "control",
         exchange=None,
+        long_wait=None,
     ) -> None:
-        """`exchange`: an ExchangeLog that gets every request and answer."""
+        """`exchange`: an ExchangeLog that gets every request and answer.
+        `long_wait`: a LongWait; while it is switched on, an answer is waited
+        for much longer (the server may be stopped at a breakpoint)."""
         self._host = host
         self._port = port
         self._connect_timeout_s = connect_timeout_s
         self._response_timeout_s = response_timeout_s
         self._name = name
         self._exchange = exchange
+        self._long_wait = long_wait
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._lock = asyncio.Lock()
@@ -80,7 +85,7 @@ class ControlClient:
             try:
                 self._writer.write(payload)
                 await self._writer.drain()
-                raw = await asyncio.wait_for(self._read_response(), timeout_s or self._response_timeout_s)
+                raw = await self._answer(command, timeout_s or self._response_timeout_s)
             except (
                 OSError,
                 asyncio.IncompleteReadError,
@@ -97,6 +102,37 @@ class ControlClient:
             if self._exchange is not None:
                 self._exchange.received(self._name, raw)
             return parse_response(raw)
+
+    async def _answer(self, command: str, timeout_s: float) -> bytes:
+        """The answer to the request just sent. Raises TimeoutError when it
+        does not come in time."""
+        patient = self._long_wait
+        if patient is None or not patient.enabled:
+            return await asyncio.wait_for(self._read_response(), timeout_s)
+        # Two waits on the same read, so that the answer is not lost when the
+        # first one ends: until the operators are told, then until the limit.
+        since = time.time()
+        limit = max(timeout_s, patient.max_wait_s)
+        first = min(patient.warn_after_s, limit)
+        read = asyncio.ensure_future(self._read_response())
+        told = False
+        try:
+            done, _ = await asyncio.wait({read}, timeout=first)
+            if not done:
+                told = True
+                patient.silent(command, since)
+                done, _ = await asyncio.wait({read}, timeout=limit - first)
+            if not done:
+                raise TimeoutError(f"no answer in {limit:.0f} s")
+            raw = read.result()
+        except BaseException:
+            read.cancel()
+            if told:
+                patient.gave_up()
+            raise
+        if told:
+            patient.answered(command, since)
+        return raw
 
     async def raw_exchange(self, command: str, listen_s: float = 1.0) -> bytes:
         """Send a command and return every byte received within listen_s.

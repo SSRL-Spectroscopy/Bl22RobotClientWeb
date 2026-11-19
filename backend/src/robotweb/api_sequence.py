@@ -50,6 +50,18 @@ async def exchange_log(body: ExchangeLogBody, request: Request, session: Session
     return {"enabled": exchange.enabled}
 
 
+@router.post("/long-wait", dependencies=[Depends(same_origin)])
+async def long_wait(body: ExchangeLogBody, request: Request, session: Session = Depends(require_helm)) -> dict:
+    """Switch the long wait for the control server on or off (see
+    control/long_wait.py). It changes how long a run waits, so only the
+    operator at the helm may switch it."""
+    wait = request.app.state.long_wait
+    if body.enabled != wait.enabled:
+        wait.set(body.enabled)
+        request.app.state.audit.write("long_wait_on" if body.enabled else "long_wait_off", user=session.user)
+    return {"enabled": wait.enabled}
+
+
 @router.get("/sequences")
 async def list_sequences() -> list[dict]:
     return [{"name": s.name, "label": s.label, "description": s.description} for s in SEQUENCES.values()]

@@ -33,6 +33,7 @@ from .runner import CommandRunner
 from .auth import LoginThrottle, Sessions, UserStore
 from .config import get_settings
 from .control.exchange_log import ExchangeLog
+from .control.long_wait import LongWait
 from .control import ControlClient
 from .control.poller import StatusPoller
 from .epics import EpicsMonitor
@@ -78,6 +79,11 @@ async def lifespan(app: FastAPI):
     # operator has it switched on.
     exchange = ExchangeLog(settings.data_dir / "exchange", store)
     app.state.exchange = exchange
+    # Waiting up to an hour for an answer, while an operator has it switched
+    # on (the control server stopped at a breakpoint). Commands only: the
+    # status polling keeps its short wait.
+    long_wait = LongWait(store)
+    app.state.long_wait = long_wait
     runner = CommandRunner(
         ControlClient(
             settings.control_host,
@@ -86,6 +92,7 @@ async def lifespan(app: FastAPI):
             response_timeout_s=settings.control_response_timeout_s,
             name="command",
             exchange=exchange,
+            long_wait=long_wait,
         ),
         store,
         equipment,
@@ -144,6 +151,24 @@ async def lifespan(app: FastAPI):
         references=references,
     )
     app.state.sequences = sequences
+
+    async def control_silent(command: str, seconds: float) -> None:
+        await sequences.announce(
+            "BL22HT_Control_server_not_answering",
+            f"The control server has not answered '{command}' for {seconds:.0f} s. The backend keeps waiting, "
+            f"up to {long_wait.max_wait_s / 60:.0f} min in all; after that the request counts as failed. "
+            "If the control server is stopped at a breakpoint, let it go on.",
+        )
+
+    async def control_answered(command: str, seconds: float) -> None:
+        await sequences.announce(
+            "BL22HT_Control_server_answering_again",
+            f"The control server answered '{command}' after {seconds:.0f} s. The backend goes on.",
+            level="info",
+        )
+
+    long_wait.on_silent = control_silent
+    long_wait.on_answer = control_answered
 
     async def helm_clock() -> None:
         while True:

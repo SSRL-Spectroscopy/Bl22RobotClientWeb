@@ -975,6 +975,14 @@ body,
   border: 2px solid var(--running);
 }
 
+/* the control server gives no answer and the backend keeps waiting */
+.strip-waiting {
+  display: block;
+  background: #ffc933;
+  border: 2px solid #b97f00;
+  color: #1c1400;
+}
+
 .strip-decide {
   border: 2px solid var(--critical);
 }

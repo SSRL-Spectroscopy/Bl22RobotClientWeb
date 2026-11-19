@@ -118,6 +118,8 @@ The control server is simulated and hardware commands are switched on. The porta
 
 To record the raw exchange with the control server (every request and answer, including the status polling), tick "Log the control server exchange" in the sequence view. It is off by default and after every backend restart; each time it is switched on a new file is started in `data/exchange/`. E-mail addresses are masked, and the log switches itself off when a file reaches 200 MB.
 
+When the control server is stopped at a breakpoint it answers nothing, and after the usual wait (10 seconds; 3 minutes for an upload) the run stops with an error. For such a session the operator at the helm can tick "Wait up to 60 min for the control server" in the sequence view: a request then waits up to an hour for its answer and the run goes on when the control server does. After one minute without an answer the page shows a notice and the operators get an e-mail (only with a mail server in `backend/.env`), and another when the answer arrives. A control server that is closed is still noticed at once. While a request waits, the run cannot be paused or aborted. The switch is off after every backend restart; with it off nothing changes.
+
 To have the operators e-mailed when a run stops, waits for beam or goes on again, add their addresses to `backend/.env`, comma separated: `ROBOTWEB_OPERATOR_EMAILS=first@example.org,second@example.org`. With a mail server in the same file (`ROBOTWEB_SMTP_HOST`, `_PORT`, `_SECURITY`, `_USER`, `_PASSWORD`, `_FROM`; see `backend/.env.example`) the backend sends them itself; without one the control server sends them. `python -m robotweb.notify` in `backend` sends one test message.
 
 ## Frontend
