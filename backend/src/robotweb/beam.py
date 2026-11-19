@@ -11,7 +11,7 @@ Rules (2026-11-17):
   lost beam too: better to wait than to measure without knowing.
 
 `losses` counts how often the beam was lost. The measurement sequence compares
-it before and after a scan to see whether the scan can be trusted.
+it before and after a scan to see whether the scan has to be repeated.
 """
 
 import asyncio
@@ -34,7 +34,10 @@ class BeamWatch:
         settle_s: float = 600.0,
         unknown_grace_s: float = 60.0,
         clock: Callable[[], float] = time.monotonic,
+        on_change: Callable[[bool], None] | None = None,
     ) -> None:
+        """`on_change`: called with True when the beam is lost and with False
+        when it counts as back."""
         self._read = read
         self._store = store
         self.low_ma = low_ma
@@ -42,6 +45,7 @@ class BeamWatch:
         self.settle_s = settle_s
         self.unknown_grace_s = unknown_grace_s
         self._clock = clock
+        self.on_change = on_change
 
         self.held = False
         self.losses = 0
@@ -54,6 +58,7 @@ class BeamWatch:
     def tick(self) -> None:
         """Look at the current once. Call it about once a second."""
         now = self._clock()
+        was_held = self.held
         value = self._read()
         self.current = value
         if value is None:
@@ -76,6 +81,8 @@ class BeamWatch:
             else:
                 self._good_since = None
         self._publish()
+        if self.held != was_held and self.on_change is not None:
+            self.on_change(self.held)
 
     async def run(self, interval_s: float = 1.0) -> None:
         while True:

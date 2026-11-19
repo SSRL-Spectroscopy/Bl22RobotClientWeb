@@ -186,7 +186,7 @@ def test_sequence_endpoints(http, control, passwords, alice):
     observer, bob = Browser(http), Browser(http)
     bob.login("bob", passwords["bob"])
     names = [s["name"] for s in observer.get("/api/sequences").json()]
-    assert names == ["verify_frames", "measure", "cleanup"]
+    assert names == ["verify_frames", "measure", "measure_quick", "cleanup"]
 
     # who may do what
     assert observer.get("/api/sequences/cleanup/plan").status_code == 401

@@ -114,13 +114,15 @@ The control server is simulated and hardware commands are switched on. The porta
 
 ### The measurement sequence
 
-"Measure the queue" runs every queued measurement and reports progress to the portal; the steps are described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). It needs the crystal values (the "Monochromator crystal" panel: Reload reads the two PVs, Apply writes them). It waits while the SPEAR current is below 400 mA and goes on 10 minutes after it is above 480 mA.
+"Measure the queue" runs every queued measurement and reports progress to the portal; the steps are described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). It needs the crystal values (the "Monochromator crystal" panel: Reload reads the two PVs, Apply writes them). It waits while the SPEAR current is below 400 mA and goes on where it was 10 minutes after it is above 480 mA, without optimising the beamline again. A scan that was running when the beam was lost is uploaded, and only the scan is repeated.
+
+"Measure the queue (speed up)" is the same run without the beamline optimisation (gas fill, detune, optimisation slits, table alignment, gain, mono calibration) and without the frame alignment, for a beamline that is optimised already. The reference foil and the FY filter are still exchanged and each measurement still sets its own slits and gain.
 
 To record the raw exchange with the control server (every request and answer, including the status polling), tick "Log the control server exchange" in the sequence view. It is off by default and after every backend restart; each time it is switched on a new file is started in `data/exchange/`. E-mail addresses are masked, and the log switches itself off when a file reaches 200 MB.
 
 When the control server is stopped at a breakpoint it answers nothing, and after the usual wait (10 seconds; 3 minutes for an upload) the run stops with an error. For such a session the operator at the helm can tick "Wait up to 60 min for the control server" in the sequence view: a request then waits up to an hour for its answer and the run goes on when the control server does. After one minute without an answer the page shows a notice and the operators get an e-mail (only with a mail server in `backend/.env`), and another when the answer arrives. A control server that is closed is still noticed at once. While a request waits, the run cannot be paused or aborted. The switch is off after every backend restart; with it off nothing changes.
 
-To have the operators e-mailed when a run stops, waits for beam or goes on again, add their addresses to `backend/.env`, comma separated: `ROBOTWEB_OPERATOR_EMAILS=first@example.org,second@example.org`. With a mail server in the same file (`ROBOTWEB_SMTP_HOST`, `_PORT`, `_SECURITY`, `_USER`, `_PASSWORD`, `_FROM`; see `backend/.env.example`) the backend sends them itself; without one the control server sends them. `python -m robotweb.notify` in `backend` sends one test message.
+To have the operators e-mailed when a run stops and when the beam is lost or restored during a measurement run, add their addresses to `backend/.env`, comma separated: `ROBOTWEB_OPERATOR_EMAILS=first@example.org,second@example.org`. With a mail server in the same file (`ROBOTWEB_SMTP_HOST`, `_PORT`, `_SECURITY`, `_USER`, `_PASSWORD`, `_FROM`; see `backend/.env.example`) the backend sends them itself; without one the control server sends them. `python -m robotweb.notify` in `backend` sends one test message.
 
 ## Frontend
 

@@ -163,8 +163,19 @@ class Context:
         self.crystal = engine.crystal
         self.simulation = engine.simulation
         # Set by a sequence that needs X-rays: every checkpoint then also
-        # waits while the beam is lost (beam.py).
+        # waits while the beam is lost (beam.py), and the operators are
+        # e-mailed when the beam is lost and when it is back.
         self.needs_beam = False
+
+    @property
+    def needs_beam(self) -> bool:
+        return self._needs_beam
+
+    @needs_beam.setter
+    def needs_beam(self, value: bool) -> None:
+        self._needs_beam = value
+        if not self.dry:
+            self._engine._needs_beam = value
 
     @property
     def beam_losses(self) -> int:
@@ -440,6 +451,15 @@ SEQUENCES: dict[str, Sequence] = {
             measure.run,
         ),
         Sequence(
+            "measure_quick",
+            "Measure the queue (speed up)",
+            "Like \"Measure the queue\", but without the beamline optimisation (gas fill, detune, slits, table "
+            "alignment, gain, mono calibration) and without the frame alignment. For a beamline that is "
+            "optimised already.",
+            _check_measure,
+            measure.run_quick,
+        ),
+        Sequence(
             "cleanup",
             "Clean up",
             "Returns the frame, the reference foil and the FY filter, as far as they are loaded, "
@@ -477,6 +497,13 @@ class SequenceEngine:
         self.notifier = notifier
         self.references = references
         self._beam_poll_s = beam_poll_s
+        # A run that needs X-rays is active; the beam loss its operators were
+        # last e-mailed about (BeamWatch.losses); the e-mails being sent.
+        self._needs_beam = False
+        self._loss_announced: int | None = None
+        self._beam_tasks: set[asyncio.Task] = set()
+        if beam is not None:
+            beam.on_change = self._beam_changed
         self.portal = portal
         self.science = science
         self.crystal = crystal
@@ -642,10 +669,9 @@ class SequenceEngine:
         watch = self.beam
         if watch is None or not watch.held:
             return
-        label = self._status["label"]
         self._status["waiting"] = watch.describe()
         self._log(watch.describe(), "error")
-        await self._notify("BL22HT_Run_waiting_for_beam", f"The run '{label}' is on hold. {watch.describe()}")
+        await self._announce_beam_lost()  # if the run started without beam
         try:
             while watch.held:
                 await self._checkpoint()
@@ -656,7 +682,36 @@ class SequenceEngine:
         finally:
             self._status["waiting"] = None
         self._log("The beam is back: the run goes on.")
-        await self._notify("BL22HT_Run_resumed", f"The beam is back. The run '{label}' goes on.")
+
+    def _beam_changed(self, held: bool) -> None:
+        """The beam watch saw the beam go or come back. The operators of a
+        run that needs X-rays are e-mailed at once, whatever the run is doing."""
+        if not self.active or not self._needs_beam:
+            return
+        task = asyncio.ensure_future(self._announce_beam_lost() if held else self._announce_beam_back())
+        self._beam_tasks.add(task)
+        task.add_done_callback(self._beam_tasks.discard)
+
+    async def _announce_beam_lost(self) -> None:
+        watch = self.beam
+        if watch is None or self._loss_announced == watch.losses:
+            return  # this loss was announced already
+        self._loss_announced = watch.losses
+        label = self._status["label"]
+        text = watch.describe().removeprefix("Waiting for beam: ")
+        self._log(f"The beam was lost: {text}", "error")
+        await self._notify(
+            "BL22HT_Beam_lost",
+            f"The beam was lost during the run '{label}': {text} A scan that is running is finished, uploaded "
+            "and repeated when the beam is back.",
+        )
+
+    async def _announce_beam_back(self) -> None:
+        if self.beam is None or self._loss_announced != self.beam.losses:
+            return  # no e-mail went out about this loss
+        label = self._status["label"]
+        self._log("The beam is restored.")
+        await self._notify("BL22HT_Beam_restored", f"The beam is restored. The run '{label}' goes on.")
 
     async def _notify(self, subject: str, text: str) -> None:
         if self.notifier is None or not self.notifier.addresses:
@@ -693,6 +748,7 @@ class SequenceEngine:
 
     def _end(self, state: str, detail: str | None) -> None:
         self.runner.sequence_running = False
+        self._needs_beam = False
         self._status.update(state=state, detail=detail, step=None, waiting=None, finished=time.time())
         self._audit.write(
             f"sequence_{state}", user=self._status["user"], sequence=self._status["name"], detail=detail

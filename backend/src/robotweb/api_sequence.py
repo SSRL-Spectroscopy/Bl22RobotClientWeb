@@ -25,7 +25,7 @@ def _do(action) -> dict:
 async def _read_references(name: str, request: Request) -> None:
     """The measurement sequence refuses to start while a reference foil it
     needs is missing, so it must judge by what the instrument has now."""
-    if name == "measure" and not _engine(request).active:
+    if name in ("measure", "measure_quick") and not _engine(request).active:
         await request.app.state.references.refresh()
 
 

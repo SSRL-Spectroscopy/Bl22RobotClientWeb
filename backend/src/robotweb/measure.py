@@ -16,8 +16,11 @@ with the changes agreed on 2026-11-17:
   operators get an e-mail.
 - No scan-info file: metadata belongs to the control software's upload.
 - The run waits while the beam is lost (beam.py). A scan during which the
-  beam was lost is not uploaded; it is repeated after the beamline has been
-  optimised again.
+  beam was lost is uploaded like any other, and once the beam is back only
+  the scan is repeated (and uploaded as the next batch): nothing else of the
+  measurement is done again. The beamline is NOT optimised again after a
+  beam loss: the optimisation needs the robot in a certain position and the
+  SDD detector parked.
 
 The reference foil stays loaded from one frame to the next if the next frame
 needs the same one, but the beamline is optimised at least once for every
@@ -148,11 +151,21 @@ def _title(m: dict, s: Setup) -> str:
 # answer with the value given as dry=.
 
 
-async def run(ctx: "Context") -> None:
+async def run_quick(ctx: "Context") -> None:
+    """The run without the beamline optimisation and without the frame
+    alignment, for a beamline that is optimised already. The reference foil
+    and the FY filter are still exchanged, and each measurement still sets its
+    own slits and gain."""
+    await run(ctx, quick=True)
+
+
+async def run(ctx: "Context", *, quick: bool = False) -> None:
     cut = ctx.crystal.cut
     if cut is None:
         raise MeasureError("The crystal values are not known.")
     ctx.needs_beam = True
+    if quick:
+        ctx.log("Speed-up run: the beamline is not optimised and the frames are not aligned")
     frames = _frames_to_run(ctx.queue.items)
     for item in frames:
         ctx.queue.mark(item["barcode"], "queued")
@@ -177,7 +190,7 @@ async def run(ctx: "Context") -> None:
             await _schedule(ctx, item["barcode"], scheduled)
             where = f"container {item['container']}, slot {item['slot']}"
             async with ctx.section(f"frame:{item['barcode']}", f"Frame {item['barcode']} from {where}"):
-                await _run_frame(ctx, item, cut)
+                await _run_frame(ctx, item, cut, quick)
             scheduled.discard(item["barcode"])
         async with ctx.section("end", "Return the reference foil and the FY filter, park the Soller slits and the PIPS"):
             await _return_foil_and_filter(ctx)
@@ -196,7 +209,7 @@ async def run(ctx: "Context") -> None:
         await _release(ctx, scheduled)
 
 
-async def _run_frame(ctx: "Context", item: dict, cut: str) -> None:
+async def _run_frame(ctx: "Context", item: dict, cut: str, quick: bool = False) -> None:
     barcode, container, slot = item["barcode"], item["container"], item["slot"]
     where = f"container {container}, slot {slot}"
     async with ctx.section("get", "Get the frame and check its barcode"):
@@ -223,14 +236,20 @@ async def _run_frame(ctx: "Context", item: dict, cut: str) -> None:
     in_portal = {} if ctx.dry else {m["id"]: m for m in normalise_frame(raw)["measurements"]}
     aligned = False
     edge = None  # None at the start of every frame: each frame is optimised at least once
-    optimised_at: int | None = None  # the beam-loss count when the beamline was last optimised
     for measurement in ctx.science.ordered(_open_measurements(item)):
         measured = False
         while not measured:
             await ctx.checkpoint()
             setup = ctx.science.setup(measurement, cut)
             name = f"{setup.element} {setup.edge}"
-            if setup.edge_key != edge:
+            if setup.edge_key != edge and quick:
+                # No optimisation: only the foil and the filter, if they differ.
+                ctx.log(f"New element or edge: {name} (the beamline is not optimised)")
+                if _needs_exchange(ctx, setup):
+                    async with ctx.section(f"edge:{setup.edge_key}", f"{name}: reference foil {setup.foil_element}"):
+                        await _exchange(ctx, item, setup)
+                edge = setup.edge_key
+            elif setup.edge_key != edge:
                 ctx.log(f"New element or edge: {name}")
                 async with ctx.section(
                     f"edge:{setup.edge_key}", f"{name}: reference foil {setup.foil_element}, optimise the beamline"
@@ -238,20 +257,11 @@ async def _run_frame(ctx: "Context", item: dict, cut: str) -> None:
                     await _exchange(ctx, item, setup)
                     edge = setup.edge_key
                     await ctx.checkpoint()  # waits until there is beam
-                    optimised_at = ctx.beam_losses
                     await _optimise(ctx, setup)
             elif setup.fy_filter and ctx.equipment.value(FILTER) != setup.fy_filter:
                 async with ctx.section(f"filter:{measurement['id']}", f"Exchange the FY filter for {setup.fy_filter}"):
                     await _exchange(ctx, item, setup)
-            # Optimise again whenever the beam was lost since (or during) the
-            # last optimisation.
-            while optimised_at != ctx.beam_losses:
-                ctx.log("The beam was lost since the beamline was optimised: optimising again")
-                async with ctx.section("again", f"{name}: the beam was lost, optimise the beamline again"):
-                    await ctx.checkpoint()  # waits until the beam is back
-                    optimised_at = ctx.beam_losses
-                    await _optimise(ctx, setup)
-            if not aligned:
+            if not aligned and not quick:
                 async with ctx.section("align", "Align the frame in the beam"):
                     await _align_frame(ctx)
                 aligned = True
@@ -268,6 +278,11 @@ async def _run_frame(ctx: "Context", item: dict, cut: str) -> None:
             await ctx.portal.set_frame_state(barcode, "internal_storage")
     ctx.queue.mark(barcode, "done")
     ctx.log(f"Frame {barcode} is complete and back in storage")
+
+
+def _needs_exchange(ctx: "Context", setup: Setup) -> bool:
+    equipment = ctx.equipment
+    return equipment.value(REFERENCE) != setup.foil_element or equipment.value(FILTER) != (setup.fy_filter or None)
 
 
 async def _exchange(ctx: "Context", item: dict, setup: Setup) -> None:
@@ -339,8 +354,8 @@ async def _align_frame(ctx: "Context") -> None:
 
 
 async def _measure(ctx: "Context", item: dict, m: dict, s: Setup, portal_measurements: dict) -> bool:
-    """Measure once. False if the beam was lost during the scan: nothing was
-    uploaded then and the measurement has to be repeated."""
+    """Measure once. A scan during which the beam was lost is uploaded and
+    then repeated, the scan only, until one ran with beam throughout."""
     barcode = item["barcode"]
     scan = f"{barcode}_{m['position'].upper()}"
     what = f"{m['position']} {s.trajectory}"
@@ -387,42 +402,52 @@ async def _measure(ctx: "Context", item: dict, m: dict, s: Setup, portal_measure
     }
     if s.is_sdd:
         args.update(roi1_min=s.roi1_min, roi1_size=s.roi1_size, roi2_min=s.roi2_min, roi2_size=s.roi2_size)
-    await ctx.checkpoint()  # waits here if the beam is lost right now
-    losses = ctx.beam_losses
-    answer = await ctx.command(
-        "xas_fy_scan" if s.is_sdd else "xas_scan",
-        args,
-        label=f"Scan {what}: {s.sweeps} sweeps of {s.scan_time:.0f} s",
-        dry=[scan],
-    )
-    if ctx.beam_losses != losses:
-        ctx.log(f"The beam was lost during the scan of {what}: nothing is uploaded, the scan will be repeated", "error")
-        ctx.queue.mark_measurement(barcode, m["id"], "queued")
-        await _after_scan(ctx, s)
-        return False
-    data_name = answer[0].strip() if answer else ""
-    if not data_name:
-        raise CommandFailed("The control server did not name the data of the scan, so it cannot be uploaded.")
-
     post = "POST_XAS_FY_SCAN" if s.is_sdd else "POST_XAS_SCAN"
     tail = f"{s.technique.upper()} {s.element} {s.edge} {s.detection.upper()} {s.beam.upper()}"
-    async with ctx.step(f"Upload the {s.sweeps} sweeps to the portal"):
-        for n in range(s.sweeps):
-            try:
-                await ctx.ask(
-                    f"SCAN {post} {data_name} {n + 1} {m['id']} {first_sweep + n} {batch} {tail}",
-                    label=f"Upload sweep {n + 1} of {s.sweeps}",
-                    line=False,
-                    timeout_s=UPLOAD_TIMEOUT_S,
-                )
-            except ControlConnectionError as exc:
-                # No answer: the sweep may or may not have reached the portal.
-                raise CommandFailed(
-                    f"The control server did not confirm the upload of sweep {n + 1} of {s.sweeps} "
-                    f"(portal sweep {first_sweep + n}, batch {batch}) within {UPLOAD_TIMEOUT_S:.0f} s. "
-                    f"Check in the portal whether it arrived. ({exc})"
-                ) from exc
-    ctx.log(f"Uploaded {s.sweeps} sweeps of {what} as batch {batch}")
+    again = ""  # " again" for a scan that is repeated after a beam loss
+    while True:
+        await ctx.checkpoint()  # waits here if the beam is lost right now
+        losses = ctx.beam_losses
+        answer = await ctx.command(
+            "xas_fy_scan" if s.is_sdd else "xas_scan",
+            args,
+            label=f"Scan {what}{again}: {s.sweeps} sweeps of {s.scan_time:.0f} s",
+            dry=[scan],
+        )
+        interrupted = ctx.beam_losses != losses
+        if interrupted:
+            ctx.log(
+                f"The beam was lost during the scan of {what}: it is uploaded, and the scan is repeated "
+                "once the beam is back",
+                "error",
+            )
+        data_name = answer[0].strip() if answer else ""
+        if not data_name:
+            raise CommandFailed("The control server did not name the data of the scan, so it cannot be uploaded.")
+
+        async with ctx.step(f"Upload the {s.sweeps} sweeps{' of the repeated scan' if again else ''} to the portal"):
+            for n in range(s.sweeps):
+                try:
+                    await ctx.ask(
+                        f"SCAN {post} {data_name} {n + 1} {m['id']} {first_sweep + n} {batch} {tail}",
+                        label=f"Upload sweep {n + 1} of {s.sweeps}",
+                        line=False,
+                        timeout_s=UPLOAD_TIMEOUT_S,
+                    )
+                except ControlConnectionError as exc:
+                    # No answer: the sweep may or may not have reached the portal.
+                    raise CommandFailed(
+                        f"The control server did not confirm the upload of sweep {n + 1} of {s.sweeps} "
+                        f"(portal sweep {first_sweep + n}, batch {batch}) within {UPLOAD_TIMEOUT_S:.0f} s. "
+                        f"Check in the portal whether it arrived. ({exc})"
+                    ) from exc
+        ctx.log(f"Uploaded {s.sweeps} sweeps of {what} as batch {batch}")
+        if not interrupted:
+            break
+        # The repeated scan is the next batch, its sweeps numbered on.
+        batch += 1
+        first_sweep += s.sweeps
+        again = " again"
     ctx.queue.mark_measurement(barcode, m["id"], "uploaded")
 
     await _conclude(ctx, barcode, m, what)

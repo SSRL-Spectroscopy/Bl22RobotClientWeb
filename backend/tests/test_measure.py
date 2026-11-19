@@ -560,12 +560,13 @@ async def test_the_run_waits_for_beam_and_mails_the_operators(beam_rig):
     await asyncio.sleep(0.1)
     assert "below 400 mA (now 36 mA)" in rig.status["waiting"] and rig.status["state"] == "running"
     assert rig.sent() == rig.mails() and len(rig.mails()) == 2  # nothing moved; one mail per operator
-    assert rig.mails()[0].startswith("SCHEDULER SEND_MESSAGE op1@example.org BL22HT_Run_waiting_for_beam The run")
+    assert rig.mails()[0].startswith("SCHEDULER SEND_MESSAGE op1@example.org BL22HT_Beam_lost The beam was lost")
 
     rig.current = 500.0
     assert (await rig.finish())["state"] == "finished"
-    assert [m.split()[3] for m in rig.mails()] == ["BL22HT_Run_waiting_for_beam"] * 2 + ["BL22HT_Run_resumed"] * 2
-    assert in_order(rig.log(), ["E-mail sent to the operators through the control server (BL22HT_Run_waiting_for_beam)",
+    await rig.until(lambda: len(rig.mails()) == 4)
+    assert [m.split()[3] for m in rig.mails()] == ["BL22HT_Beam_lost"] * 2 + ["BL22HT_Beam_restored"] * 2
+    assert in_order(rig.log(), ["E-mail sent to the operators through the control server (BL22HT_Beam_lost)",
                                 "The beam is back: the run goes on.", "Move OPTIC_VERT to 73"])
     assert not any("example.org" in line for line in rig.log())  # addresses stay out of the log
     assert rig.status_in_portal("KQZ-TBW", M3) == "done"
@@ -585,7 +586,7 @@ async def test_a_run_waiting_for_beam_can_be_aborted(beam_rig):
     assert rig.portal.frames["KQZ-TBW"]["state"] == "internal_storage"
 
 
-async def test_a_scan_without_beam_is_not_uploaded_but_repeated(beam_rig):
+async def test_a_scan_without_beam_is_uploaded_and_only_the_scan_is_repeated(beam_rig):
     rig = beam_rig
     rig.add("KQZ-TBW", [M3])
     rig.server.slow[("SCAN", "START_XAS_SCAN")] = 0.4  # long enough for the beam to drop in it
@@ -593,21 +594,38 @@ async def test_a_scan_without_beam_is_not_uploaded_but_repeated(beam_rig):
     await rig.until(lambda: rig.step().startswith("Scan"))
     rig.current = 100.0
     await rig.until(lambda: rig.watch.held)
+    # the operators hear of it at once, while the scan is still running
+    await rig.until(lambda: len(rig.mails()) == 2)
+    assert rig.step().startswith("Scan") and all(m.split()[3] == "BL22HT_Beam_lost" for m in rig.mails())
     rig.current = 500.0
     rig.server.slow.clear()
     assert (await rig.finish())["state"] == "finished"
+    assert [m.split()[3] for m in rig.mails()] == ["BL22HT_Beam_lost"] * 2 + ["BL22HT_Beam_restored"] * 2
 
-    sent = rig.sent()
+    sent = [r for r in rig.sent() if "SEND_MESSAGE" not in r]
     assert sum("START_XAS_SCAN" in r for r in sent) == 2
-    assert sum("POST_XAS_SCAN" in r for r in sent) == 8  # only the second scan was uploaded
-    assert all("RIGHT-C_002" in r for r in sent if "POST_XAS_SCAN" in r)
-    assert sent.count("SCAN CALIBRATE_ENERGY Ni K Si-111") == 2  # optimised again after the beam came back
+    # both scans are uploaded: the interrupted one as batch 1, the repeated one
+    # as batch 2 with the sweep numbers going on
+    posts = [r.split() for r in sent if "POST_XAS_SCAN" in r]
+    assert len(posts) == 16
+    assert [(p[2], p[5], p[6]) for p in posts[:8]] == [(posts[0][2], str(n), "1") for n in range(1, 9)]
+    assert [(p[2], p[5], p[6]) for p in posts[8:]] == [(posts[8][2], str(n), "2") for n in range(9, 17)]
+    assert posts[0][2] != posts[8][2]
+    # nothing else of the measurement is done twice
+    for once in ("SAMPLE PLACE", "SCHEDULER GET_PHOTO", "COLLECT_OFFSET"):
+        assert sum(once in r for r in sent) == 1, once
+    between = sent[sent.index(" ".join(posts[7])) + 1:sent.index(" ".join(posts[8]))]
+    assert len(between) == 1 and "START_XAS_SCAN" in between[0]
+    # the beamline is not optimised again after the beam came back
+    assert sent.count("SCAN CALIBRATE_ENERGY Ni K Si-111") == 1
+    assert sum("AUTO_GAS_FILL" in r for r in sent) == 1 and sent.count("BEAMLINE ALIGN_TABLE") == 1
     assert sent.count("SAMPLE CALIBRATE_FRAME") == 1
     assert in_order(rig.log(), [
-        "The beam was lost during the scan of Right-C Ni K EXAFS: nothing is uploaded, the scan will be repeated",
-        "The beam is back: the run goes on.",
-        "The beam was lost since the beamline was optimised: optimising again",
+        "The beam was lost during the scan of Right-C Ni K EXAFS: it is uploaded, and the scan is repeated "
+        "once the beam is back",
         "Uploaded 8 sweeps of Right-C Ni K EXAFS as batch 1",
+        "Scan Right-C Ni K EXAFS again: 8 sweeps of 160 s",
+        "Uploaded 8 sweeps of Right-C Ni K EXAFS as batch 2",
     ])
     assert [w for w in rig.portal_writes() if w[0] == M3] == [(M3, "done")]
 
@@ -658,3 +676,27 @@ async def test_an_upload_that_is_never_confirmed_stops_the_run(rig, monkeypatch)
     done = await rig.run()
     assert done["state"] == "failed"
     assert "did not confirm the upload of sweep 1" in done["detail"] and "Check in the portal" in done["detail"]
+
+
+async def test_the_speed_up_run_leaves_out_the_optimisation_and_the_frame_alignment(rig):
+    rig.add("KQZ-TBW", [M3, M1])  # Fe K, then Ni K: two edges, so two foils
+    plan = rig.engine.plan("measure_quick")
+    full = "\n".join(rig.engine.plan("measure"))
+    text = "\n".join(plan)
+    for left_out in (
+        "Fill the ion chambers", "Detune the mono", "Align the table", "Calibrate the mono",
+        "Align the frame", "optimise the beamline",
+    ):
+        assert left_out in full and left_out not in text
+    assert "Get the reference foil Fe" in text and "Get the reference foil Ni" in text
+
+    assert (await rig.run("measure_quick"))["state"] == "finished"
+    sent = rig.sent()
+    for verb in ("AUTO_GAS", "DETUNE", "ALIGN_TABLE", "CALIBRATE_ENERGY", "CALIBRATE_FRAME"):
+        assert not any(verb in request for request in sent), verb
+    # the foils are still exchanged, both measurements run, and the run ends parked
+    assert "SAMPLE GET_REF Fe" in sent and "SAMPLE GET_REF Ni" in sent
+    assert len([r for r in sent if r.startswith("SCAN START_XAS")]) == 2
+    assert sent[-1] == "MOTOR MOVE PIPS_VERT 25"
+    nodes = rig.store.get("sequence_outline")["nodes"]
+    assert all(n["state"] == "done" for _, n in walk(nodes))

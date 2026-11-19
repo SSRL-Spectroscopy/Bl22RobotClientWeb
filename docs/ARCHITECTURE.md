@@ -239,7 +239,8 @@ Single measurements can be removed from the queue; a frame whose last measuremen
 - The run goes on once the current has stayed above 480 mA for 10 minutes. A reading at or below 480 mA in that time starts the 10 minutes again.
 - If the current cannot be read for 60 s, that counts as lost beam as well.
 - While waiting, the sequence stays "running" and the page shows why it waits. Abort works at once. Pause works too; while paused, commands can be sent by hand.
-- A scan during which the beam was lost is not uploaded. After the beam is back the beamline is optimised again and the scan is repeated in full.
+- A scan during which the beam was lost is finished and uploaded like any other. After the beam is back only the scan is repeated, and uploaded as the next batch with the sweep numbers continuing; nothing else of the measurement is done again. The beamline is not optimised again after a beam loss: the run goes on where it was.
+- The operators get an e-mail when the beam is lost during a measurement run and another when it is restored, at once, whatever the run is doing.
 - A command that fails because the beam is gone (for example the gain or the energy calibration) still stops the run like any other failure.
 - Only the measurement sequence waits for beam; the verify and cleanup sequences do not need X-rays.
 
