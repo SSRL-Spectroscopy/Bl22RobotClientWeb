@@ -1,7 +1,10 @@
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
+
+from robotweb.motor_rules import MotorRules
 
 from robotweb.audit import AuditLog
 from robotweb.commands import CommandRefused
@@ -18,6 +21,7 @@ from fake_portal import frame
 
 M1 = "1" * 24
 # Two frames in slots the fake control server reports as occupied.
+CONFIG = Path(__file__).resolve().parents[2] / "config"
 FRAMES = [("KQZ-TBW", 0, 9), ("ABC-DEF", 1, 0)]
 
 
@@ -37,7 +41,10 @@ class Rig:
             settle_s=0.02,
             poll_s=0.02,
             max_poll_failures=3,
+            rules=MotorRules.load(CONFIG / "motor_rules"),
         )
+        # the Soller slits and the PIPS are parked unless a test raises them
+        server.positions["SOL_VERT"] = server.positions["PIPS_VERT"] = 25.0
         self.queue = MeasurementQueue(tmp_path / "queue.json", self.store, audit)
         self.engine = SequenceEngine(self.runner, self.equipment, self.queue, self.store, audit, tmp_path / "runs")
         for item in (FRAME, REFERENCE, FILTER):
@@ -170,10 +177,11 @@ async def test_abort_leaves_everything_in_place_and_cleanup_is_separate(rig):
     assert rig.engine.plan("cleanup") == [
         "Retract and park the SDD detector, if it is not parked",
         "Return the frame to container 0, slot 9",
+        "Park the Soller slits and the PIPS, if they are not parked",
     ]
     rig.engine.start("cleanup", user="alice")
     assert (await rig.until("finished", "failed"))["state"] == "finished"
-    assert rig.sent()[-1] == "SAMPLE RETURN_FRAME 0 9"
+    assert "SAMPLE RETURN_FRAME 0 9" in rig.sent()
     assert rig.equipment.value(FRAME) is None
 
 
@@ -221,6 +229,7 @@ async def test_cleanup_returns_frame_first_then_reference_and_filter(rig):
         "Return the frame to container 0, slot 9",
         "Return the reference foil Co",
         "Return the FY filter Z-1",
+        "Park the Soller slits and the PIPS, if they are not parked",
     ]
     rig.engine.start("cleanup", user="alice")
     assert (await rig.until("finished", "failed"))["state"] == "finished"
@@ -231,12 +240,25 @@ async def test_cleanup_returns_frame_first_then_reference_and_filter(rig):
         "SAMPLE RETURN_FRAME 0 9",
         "SAMPLE RETURN_REF Co",
         "SAMPLE RETURN_FILTER",
+        # the same for the Soller slits and the PIPS
+        "MOTOR GET_POSITION PIPS_VERT",
+        "MOTOR GET_POSITION SOL_VERT",
     ]
 
 
+async def test_cleanup_ends_with_the_soller_slits_and_the_pips_parked(rig):
+    # nothing is loaded, but a stopped fluorescence measurement left both raised
+    rig.server.positions["SOL_VERT"] = 132.0
+    rig.server.positions["PIPS_VERT"] = 132.0
+    assert rig.engine.plan("cleanup") == ["Park the Soller slits and the PIPS, if they are not parked"]
+    rig.engine.start("cleanup", user="alice")
+    assert (await rig.until("finished", "failed"))["state"] == "finished"
+    moves = [text for text in rig.sent() if text.startswith("MOTOR MOVE ")]
+    assert moves == ["MOTOR MOVE SOL_VERT 25", "MOTOR MOVE PIPS_VERT 25"]
+    assert rig.server.positions["SOL_VERT"] == 25.0 and rig.server.positions["PIPS_VERT"] == 25.0
+
+
 async def test_when_a_sequence_cannot_start(rig):
-    with pytest.raises(SequenceError, match="Nothing to clean up"):
-        rig.engine.start("cleanup", user="alice")
     with pytest.raises(SequenceError, match="unknown sequence"):
         rig.engine.start("measure_everything", user="alice")
 

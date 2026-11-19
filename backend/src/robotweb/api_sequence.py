@@ -1,6 +1,7 @@
 """Endpoints for sequences: list, plan, start, pause, resume, abort."""
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 
 from .api_auth import require_helm, require_operator, same_origin
 from .auth import Session
@@ -26,6 +27,27 @@ async def _read_references(name: str, request: Request) -> None:
     needs is missing, so it must judge by what the instrument has now."""
     if name == "measure" and not _engine(request).active:
         await request.app.state.references.refresh()
+
+
+class ExchangeLogBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/exchange-log", dependencies=[Depends(same_origin)])
+async def exchange_log(body: ExchangeLogBody, request: Request, session: Session = Depends(require_operator)) -> dict:
+    """Switch the log of the raw exchange with the control server on or off.
+    It only records: any operator may switch it, also during a run."""
+    exchange = request.app.state.exchange
+    if body.enabled and not exchange.enabled:
+        try:
+            path = exchange.start()
+        except OSError as exc:
+            raise HTTPException(500, f"The log file could not be created: {exc}") from exc
+        request.app.state.audit.write("exchange_log_on", user=session.user, file=path.name)
+    elif not body.enabled and exchange.enabled:
+        exchange.stop()
+        request.app.state.audit.write("exchange_log_off", user=session.user)
+    return {"enabled": exchange.enabled}
 
 
 @router.get("/sequences")

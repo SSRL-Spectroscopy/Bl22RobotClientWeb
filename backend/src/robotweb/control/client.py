@@ -31,12 +31,15 @@ class ControlClient:
         connect_timeout_s: float = 5.0,
         response_timeout_s: float = 10.0,
         name: str = "control",
+        exchange=None,
     ) -> None:
+        """`exchange`: an ExchangeLog that gets every request and answer."""
         self._host = host
         self._port = port
         self._connect_timeout_s = connect_timeout_s
         self._response_timeout_s = response_timeout_s
         self._name = name
+        self._exchange = exchange
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._lock = asyncio.Lock()
@@ -53,8 +56,11 @@ class ControlClient:
         async with self._lock:
             await self._drop()
 
-    async def request(self, command: str) -> Response:
+    async def request(self, command: str, *, timeout_s: float | None = None) -> Response:
         """Send one command and return the parsed response.
+
+        `timeout_s`: how long to wait for the answer, for the few requests
+        the server answers only when a long job is done (uploading a sweep).
 
         Raises ControlConnectionError if the server cannot be reached or does
         not answer in time. A response starting with ERROR is not an exception;
@@ -62,12 +68,19 @@ class ControlClient:
         """
         payload = encode_request(command)
         async with self._lock:
-            await self._ensure_connected()
+            if self._exchange is not None:
+                self._exchange.sent(self._name, command)
+            try:
+                await self._ensure_connected()
+            except ControlConnectionError as exc:
+                if self._exchange is not None:
+                    self._exchange.failed(self._name, f"not sent: {exc}")
+                raise
             assert self._reader is not None and self._writer is not None
             try:
                 self._writer.write(payload)
                 await self._writer.drain()
-                raw = await asyncio.wait_for(self._read_response(), self._response_timeout_s)
+                raw = await asyncio.wait_for(self._read_response(), timeout_s or self._response_timeout_s)
             except (
                 OSError,
                 asyncio.IncompleteReadError,
@@ -76,9 +89,13 @@ class ControlClient:
             ) as exc:
                 # After a failure the stream position is unknown, so reconnect.
                 await self._drop()
+                if self._exchange is not None:
+                    self._exchange.failed(self._name, f"no answer: {exc!r}")
                 raise ControlConnectionError(
                     f"{self._name}: no valid answer to {command!r}: {exc!r}"
                 ) from exc
+            if self._exchange is not None:
+                self._exchange.received(self._name, raw)
             return parse_response(raw)
 
     async def raw_exchange(self, command: str, listen_s: float = 1.0) -> bytes:

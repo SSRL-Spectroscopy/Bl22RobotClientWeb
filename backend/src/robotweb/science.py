@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # The control software decides the number of sweeps (instrument-api.md 4.2).
-SWEEPS = 8
+SWEEPS = 4
 
 SI_111 = "Si-111"
 SI_220 = "Si-220"

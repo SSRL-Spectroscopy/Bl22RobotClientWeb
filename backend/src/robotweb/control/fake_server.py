@@ -62,6 +62,9 @@ class FakeControlServer:
     )
     # (subsystem, verb) -> seconds, for start commands that take longer or shorter.
     slow: dict = field(default_factory=dict)
+    # (subsystem, verb) -> seconds the server takes before it answers at all
+    # (the real one answers an upload only when the upload is done).
+    answer_delay: dict = field(default_factory=dict)
     # Send the response in two pieces with a pause, to exercise the reader.
     split_delay_s: float = 0.0
     mono_energy: float = 5966.002295
@@ -136,6 +139,8 @@ class FakeControlServer:
                     continue
                 self.requests.append(request)
                 payload = self._encode(self._evaluate(request))
+                if delay := self.answer_delay.get(tuple(request.split()[:2])):
+                    await asyncio.sleep(delay)
                 if self.split_delay_s > 0 and len(payload) > 4:
                     cut = payload.index(b"\r") + 1  # after the first line
                     writer.write(payload[:cut])

@@ -67,6 +67,34 @@ function statusLine(sequence: SequenceEntry): { icon: string; kind: string; text
   }
 }
 
+type ExchangeLogEntry = { enabled: boolean; file: string | null; since: number | null; note: string | null }
+
+/** Switches the log of the raw exchange with the control server on and off. */
+function ExchangeLogSwitch({
+  entry,
+  onChange,
+}: {
+  entry: ExchangeLogEntry | undefined
+  onChange: (enabled: boolean) => void
+}) {
+  const on = entry?.enabled === true
+  return (
+    <label
+      className="switch"
+      title={
+        on
+          ? `Every request and answer is written to data/exchange/${entry?.file ?? ''}`
+          : 'Write every request to the control server and its answer to a file in data/exchange'
+      }
+    >
+      <input type="checkbox" role="switch" checked={on} onChange={(e) => onChange(e.target.checked)} />
+      Log the control server exchange
+      {on && entry?.since ? <span className="hint"> · on since {formatWhen(entry.since)}</span> : null}
+      {!on && entry?.note ? <span className="hint"> · {entry.note}</span> : null}
+    </label>
+  )
+}
+
 function RunLog({ lines }: { lines: LogLine[] }) {
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -100,6 +128,7 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
   const active = sequence.state === 'running' || sequence.state === 'paused'
   const status = statusLine(sequence)
   const chosen = defs.find((d) => d.name === selected) ?? defs[0]
+  const exchange = state['exchange_log'] as ExchangeLogEntry | undefined
 
   const run = async (action: () => Promise<unknown>) => {
     setError('')
@@ -129,6 +158,13 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
       await post(`/api/sequences/${chosen.name}/start`)
       setPlan(null)
     })
+
+  const exchangeSwitch = (
+    <ExchangeLogSwitch
+      entry={exchange}
+      onChange={(enabled) => run(() => post('/api/exchange-log', { enabled }))}
+    />
+  )
 
   return (
     <div className="columns overview">
@@ -177,6 +213,7 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
             >
               Abort after this command
             </button>
+            {exchangeSwitch}
           </div>
         )}
 
@@ -217,6 +254,7 @@ export function Sequences({ me, state }: { me: Me; state: Record<string, unknown
             >
               Start Sequence
             </button>
+            {exchangeSwitch}
             {plan !== null && !iHold && <span className="hint">Take control to start it.</span>}
             <p className="hint">{chosen.description}</p>
             {plan && <StepTree nodes={plan} label={`Steps planned: ${chosen.label}`} />}

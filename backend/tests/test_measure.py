@@ -182,7 +182,12 @@ async def test_plan_shows_foil_energies_and_order(rig):
     # Fe K (7112 eV) comes before Ni K (8333 eV), whatever the portal's order
     assert text.index("Fe K: reference foil Fe") < text.index("Ni K: reference foil Ni")
     assert "  Left-A Fe K EXAFS transmission + sdd, unfocused: 6912 to 8112 eV, 8 sweeps of 240 s" in steps
-    assert steps[-2:] == ["Return the reference foil and the FY filter", "  Return the reference foil Ni"]
+    assert steps[-4:] == [
+        "Return the reference foil and the FY filter, park the Soller slits and the PIPS",
+        "  Return the reference foil Ni",
+        "  Move SOL_VERT to 25",
+        "  Move PIPS_VERT to 25",
+    ]
     assert rig.sent() == [] and rig.portal_writes() == []  # working out the plan sends nothing
 
 
@@ -198,7 +203,7 @@ async def test_the_step_tree_is_detailed_and_the_run_follows_it(rig):
     assert [n["title"] for n in plan] == [
         "Crystal Si-111: report 1 frame(s) to the portal as scheduled",
         "Frame KQZ-TBW from container 0, slot 9",
-        "Return the reference foil and the FY filter",
+        "Return the reference foil and the FY filter, park the Soller slits and the PIPS",
     ]
     frame = plan[1]["children"]
     assert [n["title"] for n in frame] == [
@@ -353,7 +358,9 @@ async def test_one_frame_two_edges(rig):
         "SAMPLE RETURN_FRAME 0 9",
         "SAMPLE RETURN_REF Ni",
     ])
-    assert sent[-1] == "SAMPLE RETURN_REF Ni"
+    # the run ends with the foil returned and the Soller slits and the PIPS parked
+    assert in_order(sent, ["SAMPLE RETURN_REF Ni", "MOTOR MOVE SOL_VERT 25", "MOTOR MOVE PIPS_VERT 25"])
+    assert sent[-1] == "MOTOR MOVE PIPS_VERT 25"
     assert sent.count("SAMPLE CALIBRATE_FRAME") == 1
     assert sum("POST_XAS" in r for r in sent) == 16
 
@@ -425,7 +432,11 @@ async def test_tfy_measurement_gets_its_filter_and_raises_soller_and_pips(rig):
         "SCAN START_XAS_SCAN KQZ-TBW_LEFT-A 6912 8112 160 4800 8",
         "SAMPLE RETURN_REF Fe",
         "SAMPLE RETURN_FILTER",
+        # the run ends with the Soller slits and the PIPS parked
+        "MOTOR MOVE SOL_VERT 25",
+        "MOTOR MOVE PIPS_VERT 25",
     ])
+    assert sent[-1] == "MOTOR MOVE PIPS_VERT 25"
     assert not any("DET_X" in r for r in sent)
 
 
@@ -630,3 +641,20 @@ async def test_motor_moves_are_checked_against_the_rules(rig):
     # lowering PIPS_VERT is allowed
     await rig.runner.run("motor_move", {"motor": "PIPS_VERT", "position": 25.0}, user="alice")
     assert rig.server.positions["PIPS_VERT"] == 25.0
+
+
+async def test_an_upload_may_take_longer_than_an_ordinary_answer(rig):
+    # the rig's control client gives up on an ordinary answer after 1 s
+    rig.add("KQZ-TBW", [M3])
+    rig.server.answer_delay[("SCAN", "POST_XAS_SCAN")] = 1.5
+    assert (await rig.run())["state"] == "finished"
+    assert any("Uploaded" in line for line in rig.log())
+
+
+async def test_an_upload_that_is_never_confirmed_stops_the_run(rig, monkeypatch):
+    monkeypatch.setattr(measure, "UPLOAD_TIMEOUT_S", 0.3)
+    rig.add("KQZ-TBW", [M3])
+    rig.server.answer_delay[("SCAN", "POST_XAS_SCAN")] = 1.5
+    done = await rig.run()
+    assert done["state"] == "failed"
+    assert "did not confirm the upload of sweep 1" in done["detail"] and "Check in the portal" in done["detail"]

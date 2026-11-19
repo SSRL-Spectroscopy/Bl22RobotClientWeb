@@ -32,6 +32,7 @@ from .equipment import EquipmentState
 from .runner import CommandRunner
 from .auth import LoginThrottle, Sessions, UserStore
 from .config import get_settings
+from .control.exchange_log import ExchangeLog
 from .control import ControlClient
 from .control.poller import StatusPoller
 from .epics import EpicsMonitor
@@ -73,6 +74,10 @@ async def lifespan(app: FastAPI):
     # than running without the check.
     app.state.motor_rules = MotorRules.load(settings.motor_rules_dir)
     app.state.science = Science(settings.science_dir)
+    # The raw exchange with the control server, written to a file while an
+    # operator has it switched on.
+    exchange = ExchangeLog(settings.data_dir / "exchange", store)
+    app.state.exchange = exchange
     runner = CommandRunner(
         ControlClient(
             settings.control_host,
@@ -80,6 +85,7 @@ async def lifespan(app: FastAPI):
             connect_timeout_s=settings.control_connect_timeout_s,
             response_timeout_s=settings.control_response_timeout_s,
             name="command",
+            exchange=exchange,
         ),
         store,
         equipment,
@@ -167,6 +173,7 @@ async def lifespan(app: FastAPI):
                 connect_timeout_s=settings.control_connect_timeout_s,
                 response_timeout_s=settings.control_response_timeout_s,
                 name="status",
+                exchange=exchange,
             ),
             store,
             idle_interval_s=settings.status_poll_idle_s,

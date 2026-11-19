@@ -1509,3 +1509,19 @@ button.warn:not(:disabled) {
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+
+/* ---- an on/off switch with its label ---- */
+
+label.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 0.9rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.sequence-start label.switch {
+  color: var(--text);
+}

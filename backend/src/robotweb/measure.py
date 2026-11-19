@@ -28,6 +28,7 @@ is done.
 from typing import TYPE_CHECKING
 
 from . import science as sci
+from .control.client import ControlConnectionError
 from .equipment import FILTER, REFERENCE
 from .portal import PortalError
 from .runner import CommandFailed
@@ -38,6 +39,11 @@ if TYPE_CHECKING:
     from .sequence import Context, SequenceEngine
 
 NO_TAG = {"0000-0000", "000-000", ""}
+
+# The control server answers an upload request only when the sweep is in the
+# portal: it fetches the data of the scan and sends it, which takes far longer
+# than an ordinary answer.
+UPLOAD_TIMEOUT_S = 180.0
 # Queue states of a frame that the sequence will not touch.
 _SKIPPED_FRAME_STATES = {"mismatch"}
 
@@ -173,8 +179,12 @@ async def run(ctx: "Context") -> None:
             async with ctx.section(f"frame:{item['barcode']}", f"Frame {item['barcode']} from {where}"):
                 await _run_frame(ctx, item, cut)
             scheduled.discard(item["barcode"])
-        async with ctx.section("end", "Return the reference foil and the FY filter"):
+        async with ctx.section("end", "Return the reference foil and the FY filter, park the Soller slits and the PIPS"):
             await _return_foil_and_filter(ctx)
+            # A fluorescence measurement leaves them raised: the run ends
+            # with both parked.
+            await _motor(ctx, "SOL_VERT", sci.SOL_VERT_PARKED)
+            await _motor(ctx, "PIPS_VERT", sci.PIPS_VERT_PARKED)
     except Exception as exc:
         from .sequence import _Aborted  # here, because sequence.py imports this module
 
@@ -398,11 +408,20 @@ async def _measure(ctx: "Context", item: dict, m: dict, s: Setup, portal_measure
     tail = f"{s.technique.upper()} {s.element} {s.edge} {s.detection.upper()} {s.beam.upper()}"
     async with ctx.step(f"Upload the {s.sweeps} sweeps to the portal"):
         for n in range(s.sweeps):
-            await ctx.ask(
-                f"SCAN {post} {data_name} {n + 1} {m['id']} {first_sweep + n} {batch} {tail}",
-                label=f"Upload sweep {n + 1} of {s.sweeps}",
-                line=False,
-            )
+            try:
+                await ctx.ask(
+                    f"SCAN {post} {data_name} {n + 1} {m['id']} {first_sweep + n} {batch} {tail}",
+                    label=f"Upload sweep {n + 1} of {s.sweeps}",
+                    line=False,
+                    timeout_s=UPLOAD_TIMEOUT_S,
+                )
+            except ControlConnectionError as exc:
+                # No answer: the sweep may or may not have reached the portal.
+                raise CommandFailed(
+                    f"The control server did not confirm the upload of sweep {n + 1} of {s.sweeps} "
+                    f"(portal sweep {first_sweep + n}, batch {batch}) within {UPLOAD_TIMEOUT_S:.0f} s. "
+                    f"Check in the portal whether it arrived. ({exc})"
+                ) from exc
     ctx.log(f"Uploaded {s.sweeps} sweeps of {what} as batch {batch}")
     ctx.queue.mark_measurement(barcode, m["id"], "uploaded")
 

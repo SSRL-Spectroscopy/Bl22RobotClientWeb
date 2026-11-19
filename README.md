@@ -97,6 +97,8 @@ The control server is simulated and hardware commands are switched on. The porta
 
 "Measure the queue" runs every queued measurement and reports progress to the portal; the steps are described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). It needs the crystal values (the "Monochromator crystal" panel: Reload reads the two PVs, Apply writes them). It waits while the SPEAR current is below 400 mA and goes on 10 minutes after it is above 480 mA.
 
+To record the raw exchange with the control server (every request and answer, including the status polling), tick "Log the control server exchange" in the sequence view. It is off by default and after every backend restart; each time it is switched on a new file is started in `data/exchange/`. E-mail addresses are masked, and the log switches itself off when a file reaches 200 MB.
+
 To have the operators e-mailed when a run stops, waits for beam or goes on again, add their addresses to `backend/.env`, comma separated: `ROBOTWEB_OPERATOR_EMAILS=first@example.org,second@example.org`. With a mail server in the same file (`ROBOTWEB_SMTP_HOST`, `_PORT`, `_SECURITY`, `_USER`, `_PASSWORD`, `_FROM`; see `backend/.env.example`) the backend sends them itself; without one the control server sends them. `python -m robotweb.notify` in `backend` sends one test message.
 
 ## Frontend

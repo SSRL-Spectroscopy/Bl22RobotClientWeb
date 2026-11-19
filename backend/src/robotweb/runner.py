@@ -95,9 +95,10 @@ class CommandRunner:
             raise CommandFailed(f"{record['label']} failed: {record['detail']}")
         return record["answer"]
 
-    async def ask(self, text: str) -> list[str]:
-        """Send a read-only request for a sequence and return its data lines."""
-        response = await self._client.request(text)
+    async def ask(self, text: str, *, timeout_s: float | None = None) -> list[str]:
+        """Send a read-only request for a sequence and return its data lines.
+        `timeout_s`: wait longer than usual for the answer."""
+        response = await self._client.request(text, timeout_s=timeout_s)
         if not response.ok:
             raise CommandFailed(f"'{text}' was answered with: {response.error}")
         return list(response.lines)

@@ -46,7 +46,7 @@ from .notify import NotifyError
 from .outline import Outline, flat, public
 from .portal import PortalError
 from .runner import CommandFailed, CommandRunner
-from .science import ScienceError
+from .science import PIPS_VERT_PARKED, SOL_VERT_PARKED, ScienceError, num
 from .state import StateStore
 
 log = logging.getLogger(__name__)
@@ -231,20 +231,29 @@ class Context:
             return dict(dry or {})
         return await self._engine.runner.read_positions(names)
 
-    async def ask(self, text: str, *, label: str, dry: list[str] | None = None, line: bool = True) -> list[str]:
+    async def ask(
+        self,
+        text: str,
+        *,
+        label: str,
+        dry: list[str] | None = None,
+        line: bool = True,
+        timeout_s: float | None = None,
+    ) -> list[str]:
         """Send a read-only request and return its data lines; in a dry run,
-        `dry`. With line=False it gets no line of its own in the step tree."""
+        `dry`. With line=False it gets no line of its own in the step tree.
+        `timeout_s`: wait longer than usual for the answer."""
         await self.checkpoint()
         if not line:
             if self.dry:
                 return list(dry or [])
             self._engine._set_step(label)
-            return await self._engine.runner.ask(text)
+            return await self._engine.runner.ask(text, timeout_s=timeout_s)
         async with self.step(label):
             if self.dry:
                 return list(dry or [])
             self._engine._set_step(label)
-            return await self._engine.runner.ask(text)
+            return await self._engine.runner.ask(text, timeout_s=timeout_s)
 
 
 @dataclass(frozen=True)
@@ -308,8 +317,9 @@ async def _run_verify(ctx: Context) -> None:
 
 def _cleanup_steps(equipment) -> list[tuple[str, str]]:
     """(command, label) pairs that bring the robot back to holding nothing,
-    with no reference and no filter loaded. The frame goes first: while the
-    robot holds it, it cannot move anything else."""
+    with no reference and no filter loaded, and the Soller slits and the PIPS
+    parked. The frame goes first: while the robot holds it, it cannot move
+    anything else. The parking comes last and is always part of it."""
     unknown = [item for item in ITEMS if not equipment.is_known(item)]
     if unknown:
         raise SequenceError(
@@ -324,12 +334,14 @@ def _cleanup_steps(equipment) -> list[tuple[str, str]]:
         steps.append(("return_reference", f"Return the reference foil {equipment.value(REFERENCE)}"))
     if equipment.value(FILTER) is not None:
         steps.append(("return_filter", f"Return the FY filter {equipment.value(FILTER)}"))
+    steps.append(("park_slits", "Park the Soller slits and the PIPS, if they are not parked"))
     return steps
 
 
 def _check_cleanup(engine: "SequenceEngine") -> None:
-    if not _cleanup_steps(engine.equipment):
-        raise SequenceError("Nothing to clean up: no frame, reference or filter is loaded.")
+    # With nothing loaded there is still the parking of the Soller slits and
+    # the PIPS, so the cleanup can always run once the loaded state is known.
+    _cleanup_steps(engine.equipment)
 
 
 async def _run_cleanup(ctx: Context) -> None:
@@ -337,6 +349,10 @@ async def _run_cleanup(ctx: Context) -> None:
         if command == "park_detector":
             async with ctx.section("park", label):
                 await _park_detector(ctx)
+            continue
+        if command == "park_slits":
+            async with ctx.section("park_slits", label):
+                await _park_slits(ctx)
             continue
         await ctx.command(command, label=label)
         if command == "return_frame":
@@ -357,6 +373,19 @@ async def _park_detector(ctx: Context) -> None:
         await ctx.command(
             "motor_move", {"motor": "DET_X", "position": 0.0}, label="Park the detector: move DET_X to 0"
         )
+
+
+async def _park_slits(ctx: Context) -> None:
+    """A run that stopped during a fluorescence measurement leaves the Soller
+    slits and the PIPS raised. The cleanup ends with both parked."""
+    # The plan assumes they are parked; the moves show up when they are needed.
+    parked = {"SOL_VERT": SOL_VERT_PARKED, "PIPS_VERT": PIPS_VERT_PARKED}
+    positions = await ctx.read_positions(list(parked), dry=parked)
+    for motor, target in parked.items():
+        if abs(positions[motor] - target) > 0.5:
+            await ctx.command(
+                "motor_move", {"motor": motor, "position": target}, label=f"Move {motor} to {num(target)}"
+            )
 
 
 async def _report_frames_returned(ctx: Context) -> None:
@@ -413,7 +442,8 @@ SEQUENCES: dict[str, Sequence] = {
         Sequence(
             "cleanup",
             "Clean up",
-            "Returns the frame, the reference foil and the FY filter, as far as they are loaded.",
+            "Returns the frame, the reference foil and the FY filter, as far as they are loaded, "
+            "and parks the Soller slits and the PIPS.",
             _check_cleanup,
             _run_cleanup,
         ),

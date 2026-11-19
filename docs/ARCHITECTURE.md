@@ -183,7 +183,7 @@ The engine is in `backend/src/robotweb/sequence.py`. A sequence is a coroutine t
 | Sequence | What it does |
 |---|---|
 | Verify the queued frames | For each queued frame: get it, read its barcode (`SCHEDULER GET_BARCODE`), compare with the portal's barcode for that slot, return it. A mismatch is marked on the queue entry. |
-| Clean up | Returns the frame, then the reference foil, then the FY filter, as far as they are loaded. Needs all three to be known. Started only by an operator. |
+| Clean up | Returns the frame, then the reference foil, then the FY filter, as far as they are loaded, and ends with the Soller slits and the PIPS parked (`SOL_VERT` and `PIPS_VERT` at 25; they are moved only if they are not there). Needs all three to be known. Can be started with nothing loaded, to park the two. Started only by an operator. |
 
 | Measure the queue | Runs every queued measurement, frame by frame. See below. |
 
@@ -214,7 +214,7 @@ Written from `RunFrame_2` in the C# client, in `backend/src/robotweb/measure.py`
 Decisions (2026-11-17):
 
 - A measurement that is already `done` or `error` in the portal can be queued. It is set back to `pending` just before its scan, so the upload starts a new batch.
-- Any failure stops the whole run and leaves everything in place. Frames that were scheduled but never taken out of storage are released in the portal (`internal_storage`); the frame on the robot stays `loaded` until the cleanup sequence has returned it. The cleanup sequence first retracts and parks the SDD detector if it is not parked.
+- Any failure stops the whole run and leaves everything in place. Frames that were scheduled but never taken out of storage are released in the portal (`internal_storage`); the frame on the robot stays `loaded` until the cleanup sequence has returned it. The cleanup sequence first retracts and parks the SDD detector if it is not parked. A run that finishes returns the reference foil and the FY filter and ends with the Soller slits and the PIPS parked (`SOL_VERT` and `PIPS_VERT` at 25).
 - No scan-info file is produced here: scan metadata belongs to the data upload, which is the control software's job. The "frame complete" e-mail comes from the portal. E-mails to the operators are described below.
 - `BOT_VERT` moves with the robot: when the robot holds a frame in the beam, `BOT_VERT` is already in the range the detector rules need.
 - `SAMPLE PLACE` takes `<plate> <side> <number> <fy>`, for example `8-CIRCLE LEFT 1 TRUE` (from `ParseApiSamplePosition_2`): sample A is 1, H is 8, and `<fy>` is `TRUE` for TFY and SDD detection. Only the plate types `8-circle` and `8-slot` are defined. A queue with a sample on another plate type (`8-circle-gas`) is refused before anything moves.
