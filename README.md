@@ -15,13 +15,32 @@ py -3.12 -m venv .venv          # or any Python 3.12 interpreter
 .\.venv\Scripts\python -m pytest
 ```
 
-Run it (single worker only):
+### Starting and stopping
+
+Start it in a PowerShell window (single worker only):
 
 ```powershell
-.\.venv\Scripts\python -m uvicorn robotweb.main:app --port 8600
+cd C:\SSRL_LOCAL_OM\ai\RobotClientWeb\backend
+$env:EPICS_CA_ADDR_LIST = [Environment]::GetEnvironmentVariable("EPICS_CA_ADDR_LIST","Machine")
+.\.venv\Scripts\python.exe -m uvicorn robotweb.main:app --host 192.168.22.8 --port 8600 --log-level info
 ```
 
-If `frontend/dist` exists (after `npm run build`), the backend serves the page itself at http://127.0.0.1:8600/. While running, the backend polls `GET_STATUS` on the control server about once a second and holds Channel Access monitors on the PVs in `backend/src/robotweb/pvs.py`.
+- `--host` is the address the page is served on. `192.168.22.8` is this computer on the beamline network, so other computers there reach the page at http://192.168.22.8:8600/. Without `--host` only this computer can open it, at http://127.0.0.1:8600/.
+- `EPICS_CA_ADDR_LIST` tells EPICS where to ask for the PVs (for example `BL22:STORE`). The line above copies the value stored on the computer into the terminal; a terminal inside VS Code does not always have it. To give the addresses yourself, separated by spaces: `$env:EPICS_CA_ADDR_LIST = "ADDRESS1 ADDRESS2"`. The setting lasts for that window only.
+- `--log-level` sets how much the window prints: `critical`, `error`, `warning`, `info` (the default, one line per request), `debug` or `trace`. The log files in `data/` are written the same at every level.
+
+It is up when it prints `Uvicorn running on ...`. Keep the window open: closing it stops the backend.
+
+Stop it with `Ctrl+C` in that window. Do this only when no sequence or command is running: what is loaded is "unknown" after a stop in the middle of a command. If the window is gone, stop the process that holds the port:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8600 -State Listen | Select-Object OwningProcess
+Stop-Process -Id NUMBER
+```
+
+Only one backend can use the port; a second start fails until the first is stopped. A restart is needed after a change to the backend code, `backend/.env` or the files in `config/`. It logs every operator out, frees the helm and switches the exchange log off. A change to the page needs only `npm run build` in `frontend` and a reload in the browser.
+
+If `frontend/dist` exists (after `npm run build`), the backend serves the page itself. While running, the backend polls `GET_STATUS` on the control server about once a second and holds Channel Access monitors on the PVs in `backend/src/robotweb/pvs.py`.
 
 Settings come from environment variables or `backend/.env`, prefixed with `ROBOTWEB_`. Copy `backend/.env.example` to `backend/.env` to start. Secrets such as the BL22 API key (`ROBOTWEB_BL22_API_KEY`) go only in that file, which git ignores; never put them in the code or in a file that is committed.
 
