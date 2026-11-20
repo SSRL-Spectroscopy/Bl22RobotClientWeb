@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export const WINDOWS_MIN = [1, 2, 5]
+export const WINDOWS_MIN = [1, 3, 5]
 const STORAGE_KEY = 'plotWindowMin'
 
 function readStoredWindow(): number {
@@ -10,7 +10,7 @@ function readStoredWindow(): number {
   } catch {
     // storage unavailable; fall through to the default
   }
-  return 2
+  return 3
 }
 
 /** The time window shared by the plots, remembered in this browser. */
