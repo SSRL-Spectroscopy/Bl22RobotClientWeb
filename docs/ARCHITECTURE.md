@@ -276,7 +276,7 @@ Division of work with the control server: the control server uploads the measure
 ## Open items
 
 - **TLS:** not used. Operator passwords and session cookies cross the network in clear text. The design stays ready for it: no hard-coded `http://` or `ws://` URLs, a configurable `Secure` cookie flag, and the option of a reverse proxy.
-- **Camera:** a later version shows a network camera stream. Low latency matters more than image quality and bandwidth is not a constraint, so MJPEG or WebRTC, not HLS.
+- **Camera:** built 2026-11-20 (`backend/src/robotweb/camera.py`). The backend reads the MJPEG stream of an AXIS camera over one connection and passes the newest picture on to every page (`/api/camera/stream`, shown in a box in the top bar). Low latency matters more than image quality and bandwidth is not a constraint, so nothing is buffered and a slow page skips pictures. The camera's credentials stay in the backend. View only: the backend does not move the camera.
 - **Slot verification sequence:** fetch each occupied frame, read its barcode, return it, and compare with the API. After version 1.
 - **Loaded-item record:** in the longer term the control server is the better home for it, so that all clients share it.
 

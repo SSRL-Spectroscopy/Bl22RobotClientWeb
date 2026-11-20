@@ -989,9 +989,45 @@ body,
 
 .topbar-plots {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) 9.5rem;
+  /* ion chambers, mono, camera (as wide as its picture needs at the height
+     of the plots, at most 40% of the row), tiles */
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr) fit-content(40%) 9.5rem;
   gap: 0.6rem;
   margin-top: 0.4rem;
+}
+
+/* ---- the camera picture, in a box like a plot ---- */
+
+/* The box has the shape of the picture: the height is that of the plots and
+   the width follows from the picture's aspect ratio (set on the element). */
+.camera-view {
+  position: relative;
+  max-width: 100%;
+  margin: 0.15rem 0 0.3rem;
+  border-radius: 4px;
+  overflow: hidden;
+  /* behind a picture that does not fill the box: dark in both modes */
+  background: #111;
+}
+
+.camera-view img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.camera-note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: #e8e8e8;
+  background: rgb(17 17 17 / 75%);
 }
 
 .plot-tile {

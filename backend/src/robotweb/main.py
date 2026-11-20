@@ -7,9 +7,11 @@ shared state (see docs/ARCHITECTURE.md).
 import asyncio
 import contextlib
 import logging
+import signal
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api_auth import COOKIE_NAME, Presence
@@ -17,6 +19,7 @@ from .api_auth import router as auth_router
 from .api_commands import router as commands_router
 from .api_crystal import router as crystal_router
 from .beam import BeamWatch, pv_reader
+from .camera import MEDIA_TYPE, Camera, part
 from .crystal import ChannelAccess, Crystal, CrystalError, Memory
 from .notify import from_settings as notifier_from_settings
 from .references import References
@@ -69,6 +72,18 @@ async def lifespan(app: FastAPI):
     app.state.helm = helm
     app.state.presence = presence
     audit.write("backend_started")
+
+    camera = Camera(
+        store,
+        host=settings.camera_host,
+        user=settings.camera_user,
+        password=settings.camera_password.get_secret_value() if settings.camera_password else "",
+        resolution=settings.camera_resolution,
+        fps=settings.camera_fps,
+        compression=settings.camera_compression,
+    )
+    app.state.camera = camera
+    restore_signals = _end_streams_on_stop(camera)
 
     equipment = EquipmentState(settings.equipment_file, store, audit)
     # A broken rule or table file stops the backend from starting: better
@@ -220,6 +235,8 @@ async def lifespan(app: FastAPI):
 
     if epics is not None:
         epics.stop()
+    restore_signals()
+    await camera.close()
     await sequences.stop()
     await runner.stop()
     await app.state.portal.close()
@@ -228,6 +245,41 @@ async def lifespan(app: FastAPI):
     for task in tasks:
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+def _end_streams_on_stop(camera: Camera):
+    """A camera stream to a page never ends by itself, and the web server
+    waits for open answers before it stops. So when the backend is told to
+    stop (Ctrl+C), end the streams first. Returns a function that undoes it."""
+    previous: dict[int, object] = {}
+
+    def install(number: int) -> None:
+        handler = signal.getsignal(number)
+        if not callable(handler):
+            return
+
+        def stop(signum, frame) -> None:
+            camera.end_streams()
+            handler(signum, frame)
+
+        signal.signal(number, stop)
+        previous[number] = handler
+
+    for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        number = getattr(signal, name, None)
+        if number is None:
+            continue
+        try:
+            install(number)
+        except ValueError:
+            pass  # not in the main thread (the tests): nothing to do
+
+    def restore() -> None:
+        for number, handler in previous.items():
+            with contextlib.suppress(ValueError):
+                signal.signal(number, handler)
+
+    return restore
 
 
 app = FastAPI(title="RobotClientWeb", lifespan=lifespan)
@@ -254,6 +306,22 @@ async def pvs() -> list[dict]:
     """What the page shows: PVs with labels, units and the plot each belongs
     to, and the mono energy the backend works out."""
     return page_list()
+
+
+@app.get("/api/camera/stream")
+async def camera_stream(request: Request) -> StreamingResponse:
+    """The camera picture as an endless MJPEG stream, for an <img> on the
+    page. Open to everyone, like the rest of the status: Observers need no
+    login. The backend only passes pictures on; it does not move the camera."""
+    camera: Camera = request.app.state.camera
+    if not camera.configured:
+        raise HTTPException(404, "No camera is configured.")
+
+    async def parts():
+        async for frame in camera.frames():
+            yield part(frame)
+
+    return StreamingResponse(parts(), media_type=MEDIA_TYPE, headers={"Cache-Control": "no-store"})
 
 
 @app.websocket("/api/ws")

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from './auth'
+import { Camera } from './Camera'
 import { ManualControl, SampleHandling } from './Commands'
 import { Crystal } from './Crystal'
 import { HelmButton, HelmNotice } from './Helm'
@@ -199,6 +200,7 @@ function App() {
             digits={1}
             minRange={0.1}
           />
+          <Camera state={state} link={link} height={PLOT_HEIGHT} />
           <div className="tiles">
             <Tile
               pv={pvs.find((pv) => pv.name === 'SPEAR:BeamCurrAvg')}

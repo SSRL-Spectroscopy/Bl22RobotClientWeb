@@ -85,6 +85,18 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = None
     smtp_from: str = ""
 
+    # The IP camera shown on the page (camera.py): an AXIS camera, read as
+    # MJPEG over HTTP. Host: its address, with ":port" if that is not 80;
+    # empty means there is no camera. The password is a secret, like the API
+    # key. Latency comes before picture quality: a lower resolution or a
+    # higher compression (0 to 100) makes the pictures smaller and faster.
+    camera_host: str = ""
+    camera_user: str = ""
+    camera_password: SecretStr | None = None
+    camera_resolution: str = "1280x720"
+    camera_fps: int = 15
+    camera_compression: int = 30
+
     # True when this backend talks to the simulated control server
     # (python -m robotweb.simulate). The page then shows a clear banner.
     simulation: bool = False

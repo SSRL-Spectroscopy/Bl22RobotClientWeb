@@ -60,6 +60,14 @@ Settings come from environment variables or `backend/.env`, prefixed with `ROBOT
 | `ROBOTWEB_HELM_REQUEST_TIMEOUT_S` | `60` | Control transfers if the holder does not answer a request in this time |
 | `ROBOTWEB_HELM_ABSENCE_GRACE_S` | `30` | Control is freed if the holder has no page open for this long |
 
+### Camera
+
+The top of the page shows the live picture of an AXIS network camera next to the plots. Set `ROBOTWEB_CAMERA_HOST`, `ROBOTWEB_CAMERA_USER` and `ROBOTWEB_CAMERA_PASSWORD` in `backend/.env` (see `backend/.env.example`) and restart the backend; a viewer account of the camera is enough. Without a host the box says that no camera is configured.
+
+The backend reads the camera's MJPEG stream (`/axis-cgi/mjpg/video.cgi`) over one connection, however many pages are open, and passes the pictures on at `/api/camera/stream`. The connection is opened when the first page asks and closed a few seconds after the last one has left. Browsers never talk to the camera and never see its user name or password. Everyone who can open the page can see the picture, without a login. The backend does not move the camera.
+
+Latency comes before picture quality: a page that cannot keep up gets the newest picture and the ones in between are dropped. If the picture lags, lower `ROBOTWEB_CAMERA_RESOLUTION` (default `1280x720`) or `ROBOTWEB_CAMERA_FPS` (default `15`), or raise `ROBOTWEB_CAMERA_COMPRESSION` (0 to 100, default `30`). The password travels between backend and camera with HTTP digest authentication, the pictures unencrypted.
+
 ### Operator accounts
 
 Observers need no account. Operators are created on the machine that runs the backend:
