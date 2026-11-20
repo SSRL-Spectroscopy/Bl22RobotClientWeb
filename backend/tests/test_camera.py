@@ -7,7 +7,10 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from robotweb.camera import Camera, CameraError, address, part, take_frames
+from urllib.parse import parse_qsl, urlsplit
+
+import robotweb.camera as camera_module
+from robotweb.camera import Camera, CameraError, address, parse_presets, part, take_frames
 from robotweb.state import StateStore
 
 
@@ -25,7 +28,10 @@ class FakeCamera:
     def __init__(self, *, status: int = 200, every_s: float = 0.02) -> None:
         self.status = status
         self.every_s = every_s
-        self.requests: list[str] = []
+        self.requests: list[str] = []  # for the picture stream
+        self.ptz: list[dict] = []  # what was asked of ptz.cgi, without "camera"
+        self.ptz_status = 200
+        self.presets = "presetposno1=Home\r\npresetposno3=Robot\r\npresetposno2=Sample stage\r\n"
         self.open = 0
         self._writers: set[asyncio.StreamWriter] = set()
 
@@ -47,6 +53,18 @@ class FakeCamera:
         self.open += 1
         try:
             head = (await reader.readuntil(b"\r\n\r\n")).decode()
+            target = urlsplit(head.split()[1])
+            if target.path == "/axis-cgi/com/ptz.cgi":
+                asked = dict(parse_qsl(target.query))
+                assert asked.pop("camera") == "1"
+                self.ptz.append(asked)
+                body = self.presets.encode() if asked.get("query") == "presetposall" else b""
+                status = self.ptz_status if self.ptz_status != 200 else (200 if body else 204)
+                writer.write(
+                    b"HTTP/1.1 %d X\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" % (status, len(body), body)
+                )
+                await writer.drain()
+                return
             self.requests.append(head.splitlines()[0])
             if self.status != 200:
                 writer.write(b"HTTP/1.1 %d Nope\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" % self.status)
@@ -231,6 +249,105 @@ def test_the_host_may_be_an_address_pasted_from_a_browser():
         address("rtsp://10.0.0.5")
 
 
+# ---- turning and zooming ---------------------------------------------------------
+
+
+def moves(fake: FakeCamera) -> list[dict]:
+    return [asked for asked in fake.ptz if "query" not in asked]
+
+
+def test_the_preset_names_are_read_in_the_order_of_the_camera():
+    assert parse_presets("presetposno2=B side\r\npresetposno1=Home\r\npresetposno10=Z\r\n") == ["Home", "B side", "Z"]
+    assert parse_presets("") == []
+
+
+async def test_the_presets_are_read_when_the_picture_is_first_asked_for():
+    async with FakeCamera() as fake:
+        store = StateStore()
+        camera = make(fake.host, store)
+        assert store.get("camera")["presets"] is None
+        await take(camera, 1)
+        assert store.get("camera")["presets"] == ["Home", "Sample stage", "Robot"]
+        assert store.get("camera")["ptz_detail"] is None
+        await camera.close()
+
+
+async def test_turning_goes_on_while_asked_for_and_is_sent_to_the_camera_only_when_it_changes():
+    async with FakeCamera() as fake:
+        camera = make(fake.host)
+        await camera.move(40, 0)
+        await camera.move(40, 0)  # the page asks again while the button is held
+        await camera.move(40.4, 0)
+        await camera.move(0, -250)  # out of range: limited
+        await camera.zoom(30)
+        await camera.stop()
+        assert moves(fake) == [
+            {"continuouspantiltmove": "40,0"},
+            {"continuouspantiltmove": "0,-100"},
+            {"continuouszoommove": "30"},
+            {"continuouspantiltmove": "0,0"},
+            {"continuouszoommove": "0"},
+        ]
+        await camera.close()
+
+
+async def test_the_camera_is_stopped_when_the_page_stops_asking(monkeypatch):
+    monkeypatch.setattr(camera_module, "PTZ_HOLD_S", 0.2)
+    async with FakeCamera() as fake:
+        camera = make(fake.host)
+        started = time.monotonic()
+        await camera.move(0, 50)
+        await camera.zoom(-20)
+        for _ in range(4):  # held for a while: no stop yet
+            await asyncio.sleep(0.1)
+            await camera.move(0, 50)
+        assert time.monotonic() - started > 0.35 and len(moves(fake)) == 2
+        await until(lambda: len(moves(fake)) == 4, "stopping the camera")
+        assert moves(fake)[2:] == [{"continuouspantiltmove": "0,0"}, {"continuouszoommove": "0"}]
+        await asyncio.sleep(0.4)
+        assert len(moves(fake)) == 4  # stopped once, not again and again
+        await camera.close()
+
+
+async def test_a_camera_left_turning_is_stopped_when_the_backend_stops():
+    async with FakeCamera() as fake:
+        camera = make(fake.host)
+        await camera.move(-30, 0)
+        await camera.close()
+        assert moves(fake)[-2:] == [{"continuouspantiltmove": "0,0"}, {"continuouszoommove": "0"}]
+
+
+async def test_home_presets_and_centring():
+    async with FakeCamera() as fake:
+        camera = make(fake.host, resolution="1280x720")
+        await camera.home()
+        with pytest.raises(CameraError, match="no preset position"):
+            await camera.goto("Robot")  # not read yet
+        await camera.read_presets()
+        await camera.goto("Sample stage")
+        with pytest.raises(CameraError, match="no preset position"):
+            await camera.goto("Nowhere")
+        await camera.center(0.25, 0.5)
+        assert moves(fake) == [
+            {"move": "home"},
+            {"gotoserverpresetname": "Sample stage"},
+            {"center": "320,360", "imagewidth": "1280", "imageheight": "720"},
+        ]
+        await camera.close()
+
+
+async def test_an_account_that_may_not_move_the_camera_is_said():
+    async with FakeCamera() as fake:
+        fake.ptz_status = 403
+        store = StateStore()
+        camera = make(fake.host, store)
+        with pytest.raises(CameraError, match="not allowed"):
+            await camera.move(10, 0)
+        await camera.read_presets()
+        assert store.get("camera")["presets"] is None and "not allowed" in store.get("camera")["ptz_detail"]
+        await camera.close()
+
+
 def test_a_wrong_resolution_stops_the_start():
     with pytest.raises(ValueError, match="1280x720"):
         Camera(StateStore(), host="camera", resolution="720p&x=1")
@@ -244,4 +361,7 @@ def test_without_a_camera_there_is_no_stream_and_the_page_is_told():
 
     with TestClient(app) as http:
         assert http.get("/api/camera/stream").status_code == 404
+        # turning the camera needs a login
+        assert http.post("/api/camera/ptz", json={"action": "home"}).status_code == 401
+        assert http.post("/api/camera/presets").status_code == 401
         assert app.state.store.get("camera")["configured"] is False

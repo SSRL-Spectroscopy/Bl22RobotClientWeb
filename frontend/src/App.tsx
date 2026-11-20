@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from './auth'
-import { Camera } from './Camera'
+import { Camera, CameraPage } from './Camera'
 import { ManualControl, SampleHandling } from './Commands'
 import { Crystal } from './Crystal'
 import { HelmButton, HelmNotice } from './Helm'
@@ -21,6 +21,7 @@ const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'queue', label: 'Queue' },
   { id: 'signals', label: 'Signals' },
+  { id: 'camera', label: 'Camera' },
   { id: 'manual', label: 'Manual control' },
   { id: 'settings', label: 'Settings' },
 ] as const
@@ -249,6 +250,7 @@ function App() {
           {tab === 'overview' && <Sequences me={me} state={state} />}
           {tab === 'queue' && <Samples me={me} state={state} />}
           {tab === 'signals' && <Signals pvs={pvs} state={state} />}
+          {tab === 'camera' && <CameraPage me={me} state={state} link={link} />}
           {tab === 'manual' && <ManualControl me={me} state={state} />}
           {tab === 'settings' && (
             <>

@@ -10,8 +10,7 @@ import logging
 import signal
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from .api_auth import COOKIE_NAME, Presence
@@ -19,7 +18,8 @@ from .api_auth import router as auth_router
 from .api_commands import router as commands_router
 from .api_crystal import router as crystal_router
 from .beam import BeamWatch, pv_reader
-from .camera import MEDIA_TYPE, Camera, part
+from .api_camera import router as camera_router
+from .camera import Camera
 from .crystal import ChannelAccess, Crystal, CrystalError, Memory
 from .notify import from_settings as notifier_from_settings
 from .references import References
@@ -284,6 +284,7 @@ def _end_streams_on_stop(camera: Camera):
 
 app = FastAPI(title="RobotClientWeb", lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(camera_router)
 app.include_router(commands_router)
 app.include_router(crystal_router)
 app.include_router(samples_router)
@@ -306,22 +307,6 @@ async def pvs() -> list[dict]:
     """What the page shows: PVs with labels, units and the plot each belongs
     to, and the mono energy the backend works out."""
     return page_list()
-
-
-@app.get("/api/camera/stream")
-async def camera_stream(request: Request) -> StreamingResponse:
-    """The camera picture as an endless MJPEG stream, for an <img> on the
-    page. Open to everyone, like the rest of the status: Observers need no
-    login. The backend only passes pictures on; it does not move the camera."""
-    camera: Camera = request.app.state.camera
-    if not camera.configured:
-        raise HTTPException(404, "No camera is configured.")
-
-    async def parts():
-        async for frame in camera.frames():
-            yield part(frame)
-
-    return StreamingResponse(parts(), media_type=MEDIA_TYPE, headers={"Cache-Control": "no-store"})
 
 
 @app.websocket("/api/ws")

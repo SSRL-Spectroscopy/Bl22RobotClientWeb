@@ -996,13 +996,77 @@ body,
   margin-top: 0.4rem;
 }
 
+/* ---- the camera page: the picture large, the controls beside it ---- */
+
+.camera-page {
+  margin-top: 0;
+}
+
+/* The buttons stay beside the picture, whatever the width: the picture
+   shrinks instead. */
+.camera-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.camera-layout .camera-view {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  border-radius: 8px;
+}
+
+.camera-view img.camera-pick {
+  cursor: crosshair;
+}
+
+.ptz {
+  flex: 0 0 auto;
+  width: 6.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.ptz p {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+/* two across, three down: up and down, left and right, zoom in and out */
+.ptz-pad {
+  display: grid;
+  grid-template-columns: repeat(2, 3rem);
+  gap: 0.3rem;
+}
+
+button.ptz-button {
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  font-size: 1.1rem;
+  /* held with a finger: no scrolling, no text selection, no long-press menu */
+  touch-action: none;
+  user-select: none;
+}
+
+button.ptz-button:active:not(:disabled) {
+  background: var(--text);
+  color: var(--surface);
+}
+
+.ptz-error {
+  color: var(--critical);
+}
+
 /* ---- the camera picture, in a box like a plot ---- */
 
-/* The box has the shape of the picture: the height is that of the plots and
-   the width follows from the picture's aspect ratio (set on the element). */
+/* The frame has the shape of the picture: its height (top bar) or its width
+   (camera page) is set on the element, the other side follows from the
+   picture's aspect ratio. */
 .camera-view {
   position: relative;
-  max-width: 100%;
   margin: 0.15rem 0 0.3rem;
   border-radius: 4px;
   overflow: hidden;

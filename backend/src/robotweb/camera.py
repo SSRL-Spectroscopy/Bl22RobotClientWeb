@@ -10,8 +10,15 @@
   are never logged or published.
 
 The picture is read from the camera's VAPIX address
-`/axis-cgi/mjpg/video.cgi`. Nothing is sent to the camera but this request:
-the backend does not move it.
+`/axis-cgi/mjpg/video.cgi`.
+
+An operator can turn and zoom the camera (PTZ, `/axis-cgi/com/ptz.cgi`):
+
+- Turning and zooming go on only while the page keeps asking for them. If
+  the page stops asking (button released, page closed, network gone) the
+  backend stops the camera after PTZ_HOLD_S by itself.
+- The camera account in the settings needs the right to do this (an
+  "operator" account of the camera); a viewer account only shows the picture.
 """
 
 import asyncio
@@ -33,6 +40,10 @@ MEDIA_TYPE = f"multipart/x-mixed-replace; boundary={BOUNDARY}"
 _HEADER_END = b"\r\n\r\n"
 _LENGTH = re.compile(rb"content-length:\s*(\d+)", re.IGNORECASE)
 _RESOLUTION = re.compile(r"^\d{2,5}x\d{2,5}$")
+_PRESET = re.compile(r"^presetposno(\d+)=(.+)$", re.MULTILINE)
+
+# A move goes on this long after the page last asked for it.
+PTZ_HOLD_S = 1.2
 _MAX_HEADER = 16 * 1024
 _MAX_FRAME = 20 * 1024 * 1024
 
@@ -63,6 +74,17 @@ def take_frames(buffer: bytearray) -> list[bytes]:
             return frames
         frames.append(bytes(buffer[start : start + length]))
         del buffer[: start + length]
+
+
+def parse_presets(text: str) -> list[str]:
+    """The names of the camera's preset positions, in the camera's order,
+    from its answer to "query=presetposall"."""
+    found = sorted((int(number), name.strip()) for number, name in _PRESET.findall(text.replace("\r", "")))
+    return [name for _, name in found if name]
+
+
+def _speed(value: float) -> int:
+    return max(-100, min(100, round(value)))
 
 
 def part(frame: bytes) -> bytes:
@@ -123,6 +145,18 @@ class Camera:
         self._task: asyncio.Task | None = None
         self._closing = False
         self._state: dict | None = None
+
+        # PTZ. presets: None until the camera has been asked.
+        width, height = resolution.split("x") if self._host else ("0", "0")
+        self._size = (int(width), int(height))
+        self._control: httpx.AsyncClient | None = None
+        self._ptz_lock = asyncio.Lock()
+        self._moving = (0, 0)  # pan and tilt speed the camera was last told
+        self._zooming = 0
+        self._hold_until = 0.0
+        self._guard: asyncio.Task | None = None
+        self.presets: list[str] | None = None
+        self.ptz_detail: str | None = None
         self._publish(False, None)
 
     @property
@@ -165,6 +199,15 @@ class Camera:
 
     async def close(self) -> None:
         self.end_streams()
+        if self._guard is not None and not self._guard.done():
+            self._guard.cancel()
+        if self._moving != (0, 0) or self._zooming:
+            try:
+                await self.stop()  # do not leave the camera turning
+            except CameraError as exc:
+                log.warning("camera: could not stop it while closing: %s", exc)
+        if self._control is not None:
+            await self._control.aclose()
         if self._task is not None and not self._task.done():
             self._task.cancel()
             try:
@@ -181,6 +224,7 @@ class Camera:
 
     async def _run(self) -> None:
         timeout = httpx.Timeout(self._read_timeout_s, read=self._read_timeout_s)
+        await self.read_presets()
         try:
             # verify=False: with https a camera on the local network shows a
             # certificate it has signed itself, which cannot be checked.
@@ -237,8 +281,112 @@ class Camera:
         while self._wanted() and time.monotonic() < end:
             await asyncio.sleep(0.1)
 
+    # ---- turning and zooming (PTZ) -----------------------------------------------
+
+    async def _ptz(self, **params: str) -> str:
+        if not self.configured:
+            raise CameraError("No camera is configured.")
+        if self._control is None:
+            self._control = httpx.AsyncClient(auth=self._auth, timeout=3.0, verify=False)
+        url = f"{self._scheme}://{self._host}/axis-cgi/com/ptz.cgi"
+        try:
+            # A limit for the whole answer: the per-read timeout alone would
+            # let an answer that never ends go on for ever.
+            response = await asyncio.wait_for(self._control.get(url, params={"camera": "1", **params}), 5.0)
+        except TimeoutError as exc:
+            raise CameraError("the camera did not answer the command in time") from exc
+        except httpx.HTTPError as exc:
+            raise CameraError(f"the camera did not take the command ({str(exc).strip() or type(exc).__name__})") from exc
+        if response.status_code in (401, 403):
+            raise CameraError("the camera account in the backend's settings is not allowed to do this")
+        if response.status_code not in (200, 204):
+            raise CameraError(f"the camera answered with HTTP {response.status_code}")
+        text = response.text.strip()
+        if text.lower().startswith("error"):
+            raise CameraError(f"the camera answered: {text[:200]}")
+        return text
+
+    async def read_presets(self) -> None:
+        """Ask the camera for its preset positions. Never raises: without an
+        answer PTZ is shown as not available, with the reason."""
+        try:
+            self.presets = parse_presets(await self._ptz(query="presetposall"))
+            self.ptz_detail = None
+        except CameraError as exc:
+            self.presets = None
+            self.ptz_detail = str(exc)
+        if self._state is not None:
+            self._publish(self._state["connected"], self._state["detail"])
+
+    async def move(self, pan: float, tilt: float) -> None:
+        """Turn at these speeds (-100 to 100; right and up are positive) until
+        told otherwise, or until nobody has asked again for PTZ_HOLD_S."""
+        vector = (_speed(pan), _speed(tilt))
+        async with self._ptz_lock:
+            self._hold_until = time.monotonic() + PTZ_HOLD_S
+            if vector != self._moving:
+                await self._ptz(continuouspantiltmove=f"{vector[0]},{vector[1]}")
+                self._moving = vector
+            self._watch()
+
+    async def zoom(self, speed: float) -> None:
+        """Zoom at this speed (-100 to 100; in is positive), like move()."""
+        speed = _speed(speed)
+        async with self._ptz_lock:
+            self._hold_until = time.monotonic() + PTZ_HOLD_S
+            if speed != self._zooming:
+                await self._ptz(continuouszoommove=str(speed))
+                self._zooming = speed
+            self._watch()
+
+    async def stop(self) -> None:
+        """Stop turning and zooming. Both are always sent."""
+        async with self._ptz_lock:
+            await self._ptz(continuouspantiltmove="0,0")
+            self._moving = (0, 0)
+            await self._ptz(continuouszoommove="0")
+            self._zooming = 0
+
+    async def home(self) -> None:
+        await self._ptz(move="home")
+
+    async def goto(self, name: str) -> None:
+        if not self.presets or name not in self.presets:
+            raise CameraError(f"the camera has no preset position called {name!r}")
+        await self._ptz(gotoserverpresetname=name)
+
+    async def center(self, x: float, y: float) -> None:
+        """Turn so that this point of the picture comes to its middle. x and
+        y: 0 to 1 from the left and from the top."""
+        width, height = self._size
+        await self._ptz(
+            center=f"{round(x * width)},{round(y * height)}", imagewidth=str(width), imageheight=str(height)
+        )
+
+    def _watch(self) -> None:
+        if self._guard is None or self._guard.done():
+            self._guard = asyncio.create_task(self._stop_when_left(), name="camera-ptz-guard")
+
+    async def _stop_when_left(self) -> None:
+        """Stops the camera when the page has not asked again in time."""
+        while self._moving != (0, 0) or self._zooming:
+            if time.monotonic() >= self._hold_until:
+                try:
+                    await self.stop()
+                except CameraError as exc:
+                    log.warning("camera: could not stop it, trying again: %s", exc)
+                    await asyncio.sleep(0.5)
+            await asyncio.sleep(0.05)
+
     def _publish(self, connected: bool, detail: str | None) -> None:
-        state = {"configured": self.configured, "connected": connected, "detail": detail}
+        state = {
+            "configured": self.configured,
+            "connected": connected,
+            "detail": detail,
+            # None: the camera has not been asked, or did not answer (ptz_detail)
+            "presets": self.presets,
+            "ptz_detail": self.ptz_detail,
+        }
         if state != self._state:
             self._state = state
             self._store.publish(KEY, {**state, "ts": time.time()})

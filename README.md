@@ -62,11 +62,18 @@ Settings come from environment variables or `backend/.env`, prefixed with `ROBOT
 
 ### Camera
 
-The top of the page shows the live picture of an AXIS network camera next to the plots. Set `ROBOTWEB_CAMERA_HOST`, `ROBOTWEB_CAMERA_USER` and `ROBOTWEB_CAMERA_PASSWORD` in `backend/.env` (see `backend/.env.example`) and restart the backend; a viewer account of the camera is enough. Without a host the box says that no camera is configured.
+The top of the page shows the live picture of an AXIS network camera next to the plots. Set `ROBOTWEB_CAMERA_HOST`, `ROBOTWEB_CAMERA_USER` and `ROBOTWEB_CAMERA_PASSWORD` in `backend/.env` (see `backend/.env.example`) and restart the backend. A viewer account of the camera is enough for the picture; turning and zooming it from the page needs an operator account of the camera. Without a host the box says that no camera is configured.
 
-The backend reads the camera's MJPEG stream (`/axis-cgi/mjpg/video.cgi`) over one connection, however many pages are open, and passes the pictures on at `/api/camera/stream`. The connection is opened when the first page asks and closed a few seconds after the last one has left. Browsers never talk to the camera and never see its user name or password. Everyone who can open the page can see the picture, without a login. The backend does not move the camera.
+The backend reads the camera's MJPEG stream (`/axis-cgi/mjpg/video.cgi`) over one connection, however many pages are open, and passes the pictures on at `/api/camera/stream`. The connection is opened when the first page asks and closed a few seconds after the last one has left. Browsers never talk to the camera and never see its user name or password. Everyone who can open the page can see the picture, without a login.
 
 Latency comes before picture quality: a page that cannot keep up gets the newest picture and the ones in between are dropped. If the picture lags, lower `ROBOTWEB_CAMERA_RESOLUTION` (default `1280x720`) or `ROBOTWEB_CAMERA_FPS` (default `15`), or raise `ROBOTWEB_CAMERA_COMPRESSION` (0 to 100, default `30`). The password travels between backend and camera with HTTP digest authentication, the pictures unencrypted.
+
+The "Camera" page shows the picture large, with controls to turn and zoom the camera (PTZ). Any operator who is logged in may use them; the helm is not needed, because the camera is not part of the experiment.
+
+- Hold an arrow or a zoom button: the camera moves while the button is held and stops when it is let go. The page keeps asking while the button is held, and the backend stops the camera by itself about a second after the asking ends, so a closed page or a lost connection cannot leave it turning.
+- Click a point in the picture to bring it to the middle.
+- The page has six buttons: up, down, left, right, zoom in and zoom out. The backend can also send the camera to its home position or to one of its stored preset positions (`POST /api/camera/ptz` with `home` or `preset`, written to the audit log), but the page has no buttons for these.
+- If the camera account may not move the camera, the page says so.
 
 ### Operator accounts
 
