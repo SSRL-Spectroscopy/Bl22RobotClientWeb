@@ -40,7 +40,7 @@ Stop-Process -Id NUMBER
 
 Only one backend can use the port; a second start fails until the first is stopped. A restart is needed after a change to the backend code, `backend/.env` or the files in `config/`. It logs every operator out, frees the helm and switches the exchange log off. A change to the page needs only `npm run build` in `frontend` and a reload in the browser.
 
-If `frontend/dist` exists (after `npm run build`), the backend serves the page itself. While running, the backend polls `GET_STATUS` on the control server about once a second and holds Channel Access monitors on the PVs in `backend/src/robotweb/pvs.py`.
+If `frontend/dist` exists (after `npm run build`), the backend serves the page itself. The backend does not poll the control server: it asks it only when a command or a read-out needs it (a running command asks `GET_STATUS` of its own subsystem twice a second until it has ended). The page therefore shows the status of each subsystem as last read, and the time of the control server's last answer, not a live state. While running, the backend holds Channel Access monitors on the PVs in `backend/src/robotweb/pvs.py`.
 
 Settings come from environment variables or `backend/.env`, prefixed with `ROBOTWEB_`. Copy `backend/.env.example` to `backend/.env` to start. Secrets such as the BL22 API key (`ROBOTWEB_BL22_API_KEY`) go only in that file, which git ignores; never put them in the code or in a file that is committed.
 
@@ -48,9 +48,6 @@ Settings come from environment variables or `backend/.env`, prefixed with `ROBOT
 |---|---|---|
 | `ROBOTWEB_CONTROL_HOST` | `127.0.0.1` | Control server address |
 | `ROBOTWEB_CONTROL_PORT` | `5000` | Control server port (the live server on this machine uses 13000) |
-| `ROBOTWEB_STATUS_POLL_ENABLED` | `true` | Poll the subsystem states |
-| `ROBOTWEB_STATUS_POLL_IDLE_S` | `1.0` | Poll interval while everything is idle |
-| `ROBOTWEB_STATUS_POLL_BUSY_S` | `0.5` | Poll interval while any subsystem is busy |
 | `ROBOTWEB_EPICS_ENABLED` | `true` | Monitor the EPICS PVs |
 | `ROBOTWEB_HISTORY_WINDOW_S` | `300` | Seconds of history kept for plotted PVs |
 | `ROBOTWEB_MOTION_COMMANDS_ENABLED` | `false` | Allow commands that move hardware. Read-only queries work either way |
@@ -118,7 +115,7 @@ The control server is simulated and hardware commands are switched on. The porta
 
 "Measure the queue (speed up)" is the same run without the beamline optimisation (gas fill, detune, optimisation slits, table alignment, gain, mono calibration) and without the frame alignment, for a beamline that is optimised already. The reference foil and the FY filter are still exchanged and each measurement still sets its own slits and gain.
 
-To record the raw exchange with the control server (every request and answer, including the status polling), tick "Log the control server exchange" in the sequence view. It is off by default and after every backend restart; each time it is switched on a new file is started in `data/exchange/`. E-mail addresses are masked, and the log switches itself off when a file reaches 200 MB.
+To record the raw exchange with the control server (every request and answer), tick "Log the control server exchange" in the sequence view. It is off by default and after every backend restart; each time it is switched on a new file is started in `data/exchange/`. E-mail addresses are masked, and the log switches itself off when a file reaches 200 MB.
 
 When the control server is stopped at a breakpoint it answers nothing, and after the usual wait (10 seconds; 3 minutes for an upload) the run stops with an error. For such a session the operator at the helm can tick "Wait up to 60 min for the control server" in the sequence view: a request then waits up to an hour for its answer and the run goes on when the control server does. After one minute without an answer the page shows a notice and the operators get an e-mail (only with a mail server in `backend/.env`), and another when the answer arrives. A control server that is closed is still noticed at once. While a request waits, the run cannot be paused or aborted. The switch is off after every backend restart; with it off nothing changes.
 

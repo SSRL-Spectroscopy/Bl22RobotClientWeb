@@ -35,8 +35,6 @@ def control(monkeypatch):
     thread = ServerThread()
     monkeypatch.setenv("ROBOTWEB_CONTROL_PORT", str(thread.server.port))
     monkeypatch.setenv("ROBOTWEB_MOTION_COMMANDS_ENABLED", "1")
-    monkeypatch.setenv("ROBOTWEB_STATUS_POLL_IDLE_S", "0.1")
-    monkeypatch.setenv("ROBOTWEB_STATUS_POLL_BUSY_S", "0.05")
     yield thread.server
     thread.stop()
 

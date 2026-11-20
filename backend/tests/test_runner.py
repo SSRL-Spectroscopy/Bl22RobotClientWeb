@@ -7,7 +7,6 @@ from robotweb.audit import AuditLog
 from robotweb.commands import CommandRefused
 from robotweb.control import ControlClient, ControlConnectionError
 from robotweb.control.fake_server import FakeControlServer
-from robotweb.control.poller import StatusPoller
 from robotweb.equipment import FILTER, FRAME, REFERENCE, EquipmentState
 from robotweb.runner import CommandRunner
 from robotweb.state import StateStore
@@ -29,7 +28,6 @@ class Rig:
             settle_s=0.02,
             poll_s=0.03,
             max_poll_failures=3,
-            own_activity_grace_s=0.2,
         )
         for item in (FRAME, REFERENCE, FILTER):
             self.equipment.declare(item, None, user="alice")
@@ -242,35 +240,43 @@ async def test_live_positions_feed_the_rule_check(rig):
     assert any("JOINT_1 is at 90" in p for p in problems)
 
 
-async def test_activity_started_elsewhere_makes_the_sample_items_unknown(rig):
-    poller = StatusPoller(
-        ControlClient("127.0.0.1", rig.server.port), rig.store, on_status=rig.runner.observe_status
-    )
+async def test_the_requests_of_a_command_show_the_subsystem_and_the_last_answer(rig):
+    control = rig.store.get("control")
+    assert control["connected"] is None and control["last_answer"] is None
+    assert rig.store.get("subsystem.SAMPLE") is None  # nothing is polled
+
+    await rig.runner.start("get_reference", {"name": "Co"}, user="alice")
+    assert rig.store.get("control")["connected"] is True
+    seen = set()
+    while rig.runner.busy:
+        seen.add(rig.store.get("subsystem.SAMPLE")["state"])
+        await asyncio.sleep(0.01)
+    assert seen - {"IDLE"}  # the running step was shown
+    sample = rig.store.get("subsystem.SAMPLE")
+    assert sample["state"] == "IDLE" and not sample["failed"]
+    assert sample["ts"] <= rig.store.get("control")["last_answer"]
+    # only the subsystem of the command was asked
+    assert rig.store.get("subsystem.MOTOR") is None
+    assert all(r.startswith("SAMPLE") for r in rig.server.requests)
+
+
+async def test_activity_started_elsewhere_is_not_noticed(rig):
     other = ControlClient("127.0.0.1", rig.server.port)
     try:
-        await poller.poll_once()
-        assert rig.equipment.is_known(FRAME)
-
         await other.request("SAMPLE GET_FRAME 1 1")  # e.g. the older C# client
-        await poller.poll_once()
-        for item in (FRAME, REFERENCE, FILTER):
-            assert not rig.equipment.is_known(item)
-            assert "did not start" in rig.equipment.describe(item)["reason"]
-        assert rig.actions().count("foreign_activity") == 1
-        await poller.poll_once()  # reported once per episode
-        assert rig.actions().count("foreign_activity") == 1
+        await asyncio.sleep(0.1)
+        assert rig.equipment.is_known(FRAME)
+        assert "foreign_activity" not in rig.actions()
     finally:
         await other.close()
 
 
-async def test_own_commands_are_not_mistaken_for_foreign_activity(rig):
-    poller = StatusPoller(
-        ControlClient("127.0.0.1", rig.server.port), rig.store, on_status=rig.runner.observe_status
-    )
-    await rig.runner.start("get_reference", {"name": "Co"}, user="alice")
-    await poller.poll_once()  # sees SAMPLE busy with our command
-    await rig.finished()
-    await poller.poll_once()
-    assert rig.equipment.value(REFERENCE) == "Co"
-    assert rig.equipment.is_known(FRAME) and rig.equipment.is_known(FILTER)
-    assert "foreign_activity" not in rig.actions()
+async def test_a_control_server_that_is_away_is_shown_with_the_last_answer(rig):
+    await rig.runner.ask("SAMPLE LIST_REF")
+    last = rig.store.get("control")["last_answer"]
+    assert last is not None
+    await rig.server.stop()
+    with pytest.raises(ControlConnectionError):
+        await rig.runner.ask("SAMPLE LIST_REF")
+    control = rig.store.get("control")
+    assert control["connected"] is False and control["last_answer"] == last and control["detail"]

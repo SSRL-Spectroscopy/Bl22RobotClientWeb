@@ -7,7 +7,9 @@ def test_health_reports_unreachable_control_server():
     with TestClient(app) as http:
         body = http.get("/api/health").json()
     assert body["backend"] == "ok"
-    assert body["control_server"]["connected"] is False
+    # not polled: unknown until the first request (the reference list, read
+    # at the start) has failed
+    assert body["control_server"]["connected"] in (None, False)
 
 
 def test_pv_list():

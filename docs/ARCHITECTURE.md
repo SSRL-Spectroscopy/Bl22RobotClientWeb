@@ -26,7 +26,7 @@ FastAPI backend (one process, one worker; also serves the built frontend)
    |- equipment state (persisted to a file)
    |- sequence runner
    '- adapters, each a long-running asyncio task with reconnect
-        |- control server: two TCP connections (status poll, commands)
+        |- control server: one TCP connection (commands and read-outs, no polling)
         |- BL22 REST API (called directly)
         '- EPICS Channel Access monitors
 ```
@@ -49,7 +49,7 @@ ASCII over TCP, strictly request/response.
 
 Framing, confirmed against the live server on 2026-11-16 with `backend/tools/capture_raw.py`: lines inside a response are separated by a bare CR, and every response, success or failure, ends with CRLF CRLF. Some read-only requests take more than a second to answer (`SAMPLE GET_SAMPLE_STORAGE_SLOTS` took over 1.5 s).
 
-The backend uses two connections: one polls the four `GET_STATUS` commands about once a second, the other carries commands. The browser never sends raw protocol strings; the backend exposes named actions and builds the strings itself. Commands are implemented one at a time as they are needed. The `SCHEDULER` commands are not used: the backend calls the BL22 REST API directly.
+The backend uses one connection and does not poll (changed 2026-11-19): the control server is asked only when a command or a read-out needs it. A command asks `GET_STATUS` of its own subsystem once before it starts and then twice a second until the subsystem is idle again. The page shows each subsystem's status as last read, with the time, and the time of the control server's last answer. The browser never sends raw protocol strings; the backend exposes named actions and builds the strings itself. Commands are implemented one at a time as they are needed. The `SCHEDULER` commands are not used: the backend calls the BL22 REST API directly.
 
 ## EPICS
 
@@ -122,7 +122,7 @@ The control server does not record what is loaded, so the backend does. This gua
 - Tracked by the backend (no readback exists): the frame (in storage or on the beam, and which slot), the reference foil, the FY filter.
 - Read back from the control server: motor positions (`SOL_VERT`, `PIPS_VERT`, `OPTIC_VERT`, `DET_X`, `DET_Y`), compared with the named positions within a tolerance. An encoder cross-check can be added later.
 - Tracked state is written to a file on every change and survives a restart.
-- Any item can be "unknown". It becomes unknown when a command fails or when the status poll sees activity the backend did not start. Motion commands that depend on an unknown item are blocked until an operator declares the actual state.
+- Any item can be "unknown". It becomes unknown when a command fails. Activity the backend did not start (for example the older C# client driving the robot) is not noticed, because the control server is not polled: the operator has to declare the state after working with another client. Motion commands that depend on an unknown item are blocked until an operator declares the actual state.
 - Each motion command has preconditions that the backend checks before sending it.
 - While a command runs, the items it changes are marked "changing" on disk before the command is sent, so a backend restart mid-command leaves them unknown.
 - If the control server refuses a command outright, the previous state is kept. If contact is lost or the subsystem reports an error, the affected items become unknown.

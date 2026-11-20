@@ -103,6 +103,34 @@ function Tile({
   )
 }
 
+/** How the last request to the control server went. It is not polled, so
+ *  this is the time of its last answer and not a live connection state. */
+function ControlPill({ control }: { control: ControlEntry | undefined }) {
+  const last = control?.last_answer ? formatWhen(control.last_answer) : null
+  if (control?.connected === true && last) {
+    return (
+      <span className="pill ok" title="The control server is asked only when a command or a read-out needs it.">
+        <span aria-hidden="true">● </span>
+        Control server: last answer {last}
+      </span>
+    )
+  }
+  if (control?.connected === false) {
+    return (
+      <span className="pill down" title={control.detail ?? ''}>
+        <span aria-hidden="true">○ </span>
+        Control server: no answer{last ? ` (last answer ${last})` : ''}
+      </span>
+    )
+  }
+  return (
+    <span className="pill" title="The control server is asked only when a command or a read-out needs it.">
+      <span aria-hidden="true">○ </span>
+      Control server: not asked yet
+    </span>
+  )
+}
+
 function App() {
   const { link, state } = useLive()
   const { me, login, logout, refresh } = useAuth()
@@ -152,10 +180,7 @@ function App() {
             <span aria-hidden="true">{link === 'open' ? '●' : '○'} </span>
             {link === 'open' ? 'Live' : link === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
           </span>
-          <span className={control?.connected ? 'pill ok' : 'pill down'} title={control?.detail ?? ''}>
-            <span aria-hidden="true">{control?.connected ? '●' : '○'} </span>
-            Control server {control?.connected ? 'connected' : 'not connected'}
-          </span>
+          <ControlPill control={control} />
           <Subsystems state={state} />
           <span className="topbar-space" />
           <HelmButton me={me} helm={helm} />

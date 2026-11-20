@@ -50,14 +50,6 @@ class References:
     async def refresh(self) -> None:
         """Ask the control server. Never raises: if the list cannot be read
         it is unknown, and nothing is marked as missing."""
-        control = self._store.get("control")
-        if control is not None and not control.get("connected"):
-            # The status poll already knows the control server is away: do not
-            # make the caller wait for another connection attempt.
-            self.available = None
-            self.error = "the list of references could not be read: the control server is not connected"
-            self._publish()
-            return
         try:
             self.available = parse(await self._runner.ask("SAMPLE LIST_REF"))
             self.error = None

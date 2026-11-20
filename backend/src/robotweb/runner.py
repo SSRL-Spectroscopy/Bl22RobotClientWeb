@@ -7,8 +7,11 @@ One command runs at a time. For each command the runner:
   4. polls "<SUBSYSTEM> GET_STATUS" until the subsystem is idle again,
   5. records the new equipment state on success, or "unknown" on any doubt.
 
-It also watches the status poll for activity it did not start (for example
-the older C# client driving the robot) and marks the affected items unknown.
+The control server is not polled: it is only asked when a command or a
+read-out needs it. What those requests show on the way (the state of a
+subsystem, and when the server last answered) is published for the page.
+Activity the backend did not start (for example the older C# client driving
+the robot) is therefore not noticed.
 """
 
 import asyncio
@@ -20,21 +23,23 @@ from collections.abc import Iterable
 from .audit import AuditLog
 from .commands import COMMANDS, QUERIES, Command, CommandRefused, slot_is_occupied
 from .control.client import ControlClient, ControlConnectionError
-from .control.protocol import ProtocolError, SubsystemStatus, parse_status
-from .equipment import ITEMS, EquipmentState
+from .control.protocol import ProtocolError, Response, SubsystemStatus, parse_status
+from .equipment import EquipmentState
 from .motor_rules import MotorRules
 from .state import StateStore
 
 log = logging.getLogger(__name__)
 
 COMMAND_KEY = "command"
+CONTROL_KEY = "control"
+
+
+def subsystem_key(name: str) -> str:
+    return f"subsystem.{name}"
 
 
 class CommandFailed(Exception):
     """A command or request made by a sequence did not succeed."""
-
-# Which equipment items a subsystem can change when something else drives it.
-_ITEMS_OF_SUBSYSTEM = {"SAMPLE": ITEMS}
 
 
 class CommandRunner:
@@ -50,7 +55,6 @@ class CommandRunner:
         settle_s: float = 0.1,
         poll_s: float = 0.5,
         max_poll_failures: int = 10,
-        own_activity_grace_s: float = 2.0,
     ) -> None:
         self._client = client
         self._store = store
@@ -61,21 +65,59 @@ class CommandRunner:
         self._settle_s = settle_s
         self._poll_s = poll_s
         self._max_poll_failures = max_poll_failures
-        self._grace_s = own_activity_grace_s
 
         self._ids = itertools.count(1)
         self._active: dict | None = None
         self._task: asyncio.Task | None = None
-        self._last_finished: dict[str, float] = {}
-        self._foreign_reported: set[str] = set()
         # Set by the sequence engine while a sequence is running and not
         # paused; commands sent by hand are refused meanwhile.
         self.sequence_running = False
         self._store.publish(COMMAND_KEY, {"phase": "none", "ts": time.time()})
+        # connected: None until the control server has been asked something.
+        self._last_answer: float | None = None
+        self._store.publish(
+            CONTROL_KEY, {"connected": None, "detail": "not asked yet", "last_answer": None, "ts": time.time()}
+        )
 
     @property
     def busy(self) -> bool:
         return self._active is not None
+
+    # ---- what the requests show ------------------------------------------------
+
+    async def _request(self, text: str, *, timeout_s: float | None = None) -> Response:
+        """Every request to the control server goes through here, so the page
+        can show when it last answered."""
+        try:
+            response = await self._client.request(text, timeout_s=timeout_s)
+        except ControlConnectionError as exc:
+            self._store.publish(
+                CONTROL_KEY,
+                {"connected": False, "detail": str(exc), "last_answer": self._last_answer, "ts": time.time()},
+            )
+            raise
+        self._last_answer = time.time()
+        self._store.publish(
+            CONTROL_KEY, {"connected": True, "detail": None, "last_answer": self._last_answer, "ts": self._last_answer}
+        )
+        return response
+
+    async def _read_status(self, subsystem: str) -> SubsystemStatus:
+        """Ask a subsystem for its status and publish it: `ts` is when it was read."""
+        response = await self._request(f"{subsystem} GET_STATUS")
+        try:
+            status = parse_status(response)
+        except ProtocolError as exc:
+            # The server answered, but not with a usable status.
+            self._store.publish(
+                subsystem_key(subsystem), {"state": "UNKNOWN", "error": str(exc), "failed": True, "ts": time.time()}
+            )
+            raise
+        self._store.publish(
+            subsystem_key(subsystem),
+            {"state": status.state, "error": status.error, "failed": status.failed, "ts": time.time()},
+        )
+        return status
 
     # ---- commands -----------------------------------------------------------
 
@@ -98,7 +140,7 @@ class CommandRunner:
     async def ask(self, text: str, *, timeout_s: float | None = None) -> list[str]:
         """Send a read-only request for a sequence and return its data lines.
         `timeout_s`: wait longer than usual for the answer."""
-        response = await self._client.request(text, timeout_s=timeout_s)
+        response = await self._request(text, timeout_s=timeout_s)
         if not response.ok:
             raise CommandFailed(f"'{text}' was answered with: {response.error}")
         return list(response.lines)
@@ -158,7 +200,7 @@ class CommandRunner:
         }
         self._active = record
         try:
-            status = parse_status(await self._client.request(f"{spec.subsystem} GET_STATUS"))
+            status = await self._read_status(spec.subsystem)
             if not status.idle:
                 raise CommandRefused(f"{spec.subsystem} is busy ({status.state}). Wait until it is idle.")
             spec.check(self._equipment, args)
@@ -180,7 +222,7 @@ class CommandRunner:
         record["text"] = text
         previous = {item: self._equipment.begin_change(item) for item in spec.changes}
         try:
-            response = await self._client.request(text)
+            response = await self._request(text)
         except BaseException as exc:
             # The command may or may not have reached the server.
             self._doubt(spec, f"lost contact with the control server while sending '{text}'")
@@ -222,7 +264,7 @@ class CommandRunner:
             await asyncio.sleep(self._settle_s)  # let the server leave IDLE first
             while True:
                 try:
-                    status = parse_status(await self._client.request(f"{spec.subsystem} GET_STATUS"))
+                    status = await self._read_status(spec.subsystem)
                 except (ControlConnectionError, ProtocolError) as exc:
                     failures += 1
                     if failures >= self._max_poll_failures:
@@ -266,7 +308,6 @@ class CommandRunner:
         record["detail"] = detail
         record["step"] = None
         record["finished"] = time.time()
-        self._last_finished[record["subsystem"]] = record["finished"]
         self._audit.write(
             f"command_{phase}", user=record["user"], command=record["name"], text=record["text"], detail=detail
         )
@@ -291,32 +332,10 @@ class CommandRunner:
         spec = QUERIES.get(name)
         if spec is None:
             raise CommandRefused(f"unknown query {name!r}")
-        response = await self._client.request(spec.text)
+        response = await self._request(spec.text)
         if not response.ok:
             raise CommandRefused(f"The control server answered: {response.error}")
         lines = list(response.lines)
         if spec.publish_as:
             self._store.publish(spec.publish_as, {"lines": lines, "ts": time.time()})
         return lines
-
-    # ---- activity the backend did not start ------------------------------------
-
-    def observe_status(self, subsystem: str, status: SubsystemStatus) -> None:
-        """Called by the status poll with every status it reads."""
-        if status.idle:
-            self._foreign_reported.discard(subsystem)
-            return
-        items = _ITEMS_OF_SUBSYSTEM.get(subsystem)
-        if not items or subsystem in self._foreign_reported:
-            return
-        ours = self._active is not None and self._active["subsystem"] == subsystem
-        # A poll answered just after our own command ended may still say busy.
-        recent = time.time() - self._last_finished.get(subsystem, 0.0) < self._grace_s
-        if ours or recent:
-            return
-        self._foreign_reported.add(subsystem)
-        self._audit.write("foreign_activity", subsystem=subsystem, state=status.state)
-        for item in items:
-            self._equipment.set_unknown(
-                item, f"{subsystem} was busy ({status.state}) with something this backend did not start"
-            )

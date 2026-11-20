@@ -1,12 +1,12 @@
 """The raw exchange with the control server, written to a file on request.
 
 Off unless an operator switches it on (and off again after a backend
-restart): with the status polling it grows by some ten lines a second. Each
+restart): while a command runs it grows by some four lines a second. Each
 time it is switched on a new file is started in data/exchange/, named by the
 time:
 
-    2026-11-18 13:05:10.123 status  > BEAMLINE GET_STATUS
-    2026-11-18 13:05:10.131 status  < SUCCESS BEAMLINE GET_STATUS | IDLE no_error
+    2026-11-18 13:05:10.123 command > BEAMLINE GET_STATUS
+    2026-11-18 13:05:10.131 command < SUCCESS BEAMLINE GET_STATUS | IDLE no_error
     2026-11-18 13:05:12.004 command ! no answer: TimeoutError()
 
 ">" is a request, "<" the answer with its lines joined by " | ", "!" a

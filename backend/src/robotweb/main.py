@@ -35,7 +35,6 @@ from .config import get_settings
 from .control.exchange_log import ExchangeLog
 from .control.long_wait import LongWait
 from .control import ControlClient
-from .control.poller import StatusPoller
 from .epics import EpicsMonitor
 from .helm import HelmManager
 from .mono import MonoEnergy
@@ -80,8 +79,7 @@ async def lifespan(app: FastAPI):
     exchange = ExchangeLog(settings.data_dir / "exchange", store)
     app.state.exchange = exchange
     # Waiting up to an hour for an answer, while an operator has it switched
-    # on (the control server stopped at a breakpoint). Commands only: the
-    # status polling keeps its short wait.
+    # on (the control server stopped at a breakpoint).
     long_wait = LongWait(store)
     app.state.long_wait = long_wait
     runner = CommandRunner(
@@ -190,23 +188,6 @@ async def lifespan(app: FastAPI):
     if beam is not None:
         tasks.append(asyncio.create_task(beam.run(), name="beam-watch"))
 
-    if settings.status_poll_enabled:
-        poller = StatusPoller(
-            ControlClient(
-                settings.control_host,
-                settings.control_port,
-                connect_timeout_s=settings.control_connect_timeout_s,
-                response_timeout_s=settings.control_response_timeout_s,
-                name="status",
-                exchange=exchange,
-            ),
-            store,
-            idle_interval_s=settings.status_poll_idle_s,
-            busy_interval_s=settings.status_poll_busy_s,
-            on_status=runner.observe_status,
-        )
-        tasks.append(asyncio.create_task(poller.run(), name="status-poll"))
-
     epics = None
     if settings.epics_enabled:
         mono = MonoEnergy(store, lambda: crystal.d)
@@ -240,12 +221,17 @@ app.include_router(sequence_router)
 
 @app.get("/api/health")
 async def health() -> dict:
-    """Backend liveness plus what the status poll last saw of the control server."""
-    control = app.state.store.get("control") or {"connected": False, "detail": "not polled"}
+    """Backend liveness plus how the last request to the control server went
+    (it is not polled: `connected` is None until something was asked)."""
+    control = app.state.store.get("control") or {"connected": None, "detail": "not asked yet"}
     return {
         "backend": "ok",
         "simulation": app.state.settings.simulation,
-        "control_server": {"connected": control["connected"], "detail": control.get("detail")},
+        "control_server": {
+            "connected": control["connected"],
+            "detail": control.get("detail"),
+            "last_answer": control.get("last_answer"),
+        },
     }
 
 

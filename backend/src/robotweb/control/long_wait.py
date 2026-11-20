@@ -11,8 +11,7 @@ answer the operators are told, once per request, and again when the answer
 arrives. A connection that breaks (the server was closed) still fails at
 once.
 
-Off after every backend restart. The status polling does not use it: the
-page keeps showing that the control server does not answer.
+Off after every backend restart.
 """
 
 import asyncio

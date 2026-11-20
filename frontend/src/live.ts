@@ -4,8 +4,9 @@
 
 import { useSyncExternalStore } from 'react'
 
+/** The status of a subsystem as last read, at `ts`. It is only read when a
+ *  command needs it, so it may be old. */
 export type SubsystemEntry = {
-  connected: boolean
   state: string | null
   error: string | null
   failed: boolean
@@ -19,7 +20,14 @@ export type PvEntry = {
   ts: number
 }
 
-export type ControlEntry = { connected: boolean; detail: string | null; ts: number }
+/** How the last request to the control server went. `connected` is null
+ *  until the backend has asked it something. */
+export type ControlEntry = {
+  connected: boolean | null
+  detail: string | null
+  last_answer: number | null
+  ts: number
+}
 
 export type HelmEntry = {
   holder: string | null

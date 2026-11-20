@@ -29,11 +29,6 @@ class Settings(BaseSettings):
     control_connect_timeout_s: float = 5.0
     control_response_timeout_s: float = 10.0
 
-    # Status polling ("<SUBSYSTEM> GET_STATUS" for each subsystem).
-    status_poll_enabled: bool = True
-    status_poll_idle_s: float = 1.0  # while every subsystem is idle
-    status_poll_busy_s: float = 0.5  # while any subsystem is busy
-
     # EPICS Channel Access monitors.
     epics_enabled: bool = True
 

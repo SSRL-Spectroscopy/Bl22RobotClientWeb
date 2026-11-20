@@ -18,8 +18,8 @@ def test_websocket_sends_snapshot_then_updates():
             assert snapshot["window_s"] == 300
             assert snapshot["state"]["pv.TEST"]["value"] == 1.5
             assert snapshot["history"]["pv.TEST"]["v"] == [1.5]
-            # the status poll has already reported the unreachable control server
-            assert snapshot["state"]["control"]["connected"] is False
+            # not polled: unknown, or the first request has already failed
+            assert snapshot["state"]["control"]["connected"] in (None, False)
 
             store.publish("pv.TEST", {"connected": True, "value": 2.5, "ts": now + 1})
             store.add_sample("pv.TEST", now + 1, 2.5)
