@@ -10,7 +10,7 @@ Status of this document: agreed design as of 2026-11-16. Nothing here is built y
 - Two roles: Observer (no login, read-only) and Operator (login required).
 - Local account management, no external identity service.
 - No database server. Plain files; SQLite only if a later feature needs queries.
-- No TLS for now (see Open items).
+- TLS with a self-signed certificate, switched on at the start command (see Open items).
 - Developed on Windows, deployed on Rocky Linux 9. Python 3.12 on both.
 
 ## Overview
@@ -275,7 +275,7 @@ Division of work with the control server: the control server uploads the measure
 
 ## Open items
 
-- **TLS:** not used. Operator passwords and session cookies cross the network in clear text. The design stays ready for it: no hard-coded `http://` or `ws://` URLs, a configurable `Secure` cookie flag, and the option of a reverse proxy.
+- **TLS:** set up 2026-11-23 with a self-signed certificate (`backend/tools/make_cert.sh`, files in `data/tls`). uvicorn serves HTTPS itself when started with `--ssl-certfile` and `--ssl-keyfile`, and `ROBOTWEB_COOKIE_SECURE=true` makes the session cookie `Secure`; without these the site runs over plain HTTP as before. Nothing in the code depends on the scheme: no hard-coded `http://` or `ws://` URLs, and the cross-site check compares host names only. Still open: a certificate from SLAC IT for a host name, so that browsers need no manual trust, and on the Linux deployment a reverse proxy on port 443 (the audit log then needs the forwarded client address).
 - **Camera:** built 2026-11-20 (`backend/src/robotweb/camera.py`). The backend reads the MJPEG stream of an AXIS camera over one connection and passes the newest picture on to every page (`/api/camera/stream`, shown in a box in the top bar). Low latency matters more than image quality and bandwidth is not a constraint, so nothing is buffered and a slow page skips pictures. The camera's credentials stay in the backend. A "Camera" page shows the picture large with pan, tilt and zoom controls (`POST /api/camera/ptz`, any logged-in operator, no helm needed). A move lasts only while the page keeps asking for it: the backend stops the camera about a second after the last request.
 - **Slot verification sequence:** fetch each occupied frame, read its barcode, return it, and compare with the API. After version 1.
 - **Loaded-item record:** in the longer term the control server is the better home for it, so that all clients share it.

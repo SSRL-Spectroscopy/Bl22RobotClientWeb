@@ -38,6 +38,21 @@ Get-NetTCPConnection -LocalPort 8600 -State Listen | Select-Object OwningProcess
 Stop-Process -Id NUMBER
 ```
 
+### HTTPS
+
+With a certificate the page is served encrypted, so operator passwords and session cookies no longer cross the network in clear text. Start the backend with three additions:
+
+```powershell
+$env:ROBOTWEB_COOKIE_SECURE = "true"
+.\.venv\Scripts\python.exe -m uvicorn robotweb.main:app --host 192.168.22.8 --port 8600 --log-level info --ssl-certfile ..\data\tls\cert.pem --ssl-keyfile ..\data\tls\key.pem
+```
+
+- The page is then at https://192.168.22.8:8600/. The plain `http://` address stops working: the port speaks only HTTPS.
+- `ROBOTWEB_COOKIE_SECURE` keeps the browser from ever sending the login cookie unencrypted. It can also go in `backend/.env`. With it set, logging in over plain HTTP does not work.
+- The certificate is self-signed, made with `sh tools/make_cert.sh 192.168.22.8 OMDEV3` in `backend` (Git Bash; needs `openssl`). Name every address and host name the page is opened by. It is valid for 825 days; to renew, delete the two files in `data/tls` and run the script again.
+- `data/tls/key.pem` is a secret like `backend/.env`: it stays on this computer and out of git (`data/` is ignored). `data/tls/cert.pem` is public.
+- A browser warns about a self-signed certificate until it is told to trust it. Copy `cert.pem` to the user's computer. Chrome and Edge on Windows: double-click it, "Install Certificate", "Current User", "Place all certificates in the following store", "Trusted Root Certification Authorities", then restart the browser. Firefox: open the page, "Advanced", "Accept the Risk and Continue". Before trusting it, compare the fingerprint the browser shows with the one the script printed (`openssl x509 -in cert.pem -noout -fingerprint -sha256`).
+
 Only one backend can use the port; a second start fails until the first is stopped. A restart is needed after a change to the backend code, `backend/.env` or the files in `config/`. It logs every operator out, frees the helm and switches the exchange log off. A change to the page needs only `npm run build` in `frontend` and a reload in the browser.
 
 If `frontend/dist` exists (after `npm run build`), the backend serves the page itself. While running, the backend polls `GET_STATUS` on the control server about once a second and holds Channel Access monitors on the PVs in `backend/src/robotweb/pvs.py`.
@@ -56,7 +71,7 @@ Settings come from environment variables or `backend/.env`, prefixed with `ROBOT
 | `ROBOTWEB_MOTION_COMMANDS_ENABLED` | `false` | Allow commands that move hardware. Read-only queries work either way |
 | `ROBOTWEB_DATA_DIR` | `data/` in the project folder | Where the accounts file, the audit log and the equipment record live |
 | `ROBOTWEB_SESSION_LIFETIME_S` | `43200` | How long an operator stays logged in (12 hours) |
-| `ROBOTWEB_COOKIE_SECURE` | `false` | Set to `true` once the site is served over HTTPS |
+| `ROBOTWEB_COOKIE_SECURE` | `false` | Set to `true` when the site is served over HTTPS (see "HTTPS") |
 | `ROBOTWEB_HELM_REQUEST_TIMEOUT_S` | `60` | Control transfers if the holder does not answer a request in this time |
 | `ROBOTWEB_HELM_ABSENCE_GRACE_S` | `30` | Control is freed if the holder has no page open for this long |
 
@@ -150,4 +165,4 @@ npm run build    # writes frontend/dist, which the backend then serves
 
 ## Not done yet
 
-- TLS: the site runs over plain HTTP. Operator passwords and session cookies will cross the network in clear text until TLS is added.
+- TLS: possible with a self-signed certificate (see "HTTPS"), which every browser has to be told to trust. A certificate from SLAC IT for a host name would do away with that.
