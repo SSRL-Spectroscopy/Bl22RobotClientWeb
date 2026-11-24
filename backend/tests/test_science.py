@@ -79,6 +79,7 @@ def test_scan_settings(science):
 def test_slits(science):
     assert science.setup(measurement(), "Si-111").slit_h == 6.0
     assert science.setup(measurement(plate_type="8-slot"), "Si-111").slit_h == 10.0
+    assert science.setup(measurement(plate_type="8-circle-gas"), "Si-111").slit_h == 6.0
     assert science.setup(measurement(detection="transmission_sdd"), "Si-111").slit_h == pytest.approx(4.2426, abs=1e-4)
     assert science.setup(measurement(detection="transmission_sdd", beam="focused"), "Si-111").slit_h == 10.0
     assert science.setup(measurement(), "Si-111").slit_v == pytest.approx(-4.7e-5 * 9029 + 1.43)

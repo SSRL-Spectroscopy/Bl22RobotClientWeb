@@ -64,9 +64,13 @@ def _frames_to_run(queue_items: list[dict]) -> list[dict]:
 
 
 # Plate types SAMPLE PLACE is known to understand, as the control server
-# writes them.
-_PLATES = {"8-circle": "8-CIRCLE", "8-slot": "8-SLOT"}
+# writes them: it reads the positions from PLATE_<name>.txt. The portal's
+# 8-circle-gas plate is the control server's 8-CIRCLE-AIR.
+_PLATES = {"8-circle": "8-CIRCLE", "8-slot": "8-SLOT", "8-circle-gas": "8-CIRCLE-AIR"}
 _SIDES = {"left": "LEFT", "right": "RIGHT"}
+# Plates that span the whole frame: the portal lists them on the left, and
+# SAMPLE PLACE takes NONE as their side.
+_WHOLE_FRAME_PLATES = {"8-circle-gas"}
 _FY_DETECTION = {"transmission": "FALSE", "transmission_tfy": "TRUE", "transmission_sdd": "TRUE"}
 
 
@@ -74,6 +78,7 @@ def place_argument(measurement: dict) -> str:
     """The argument of SAMPLE PLACE: "<plate> <side> <number> <fy>", for
     example "8-CIRCLE LEFT 1 TRUE" (ParseApiSamplePosition_2 in helpers.cs).
     Sample A is number 1, H is 8. <fy> is TRUE for TFY and SDD detection.
+    The gas plate gives "8-CIRCLE-AIR NONE 1 TRUE".
 
     Refuses anything it does not know for certain: a wrong argument could
     drive the sample into something.
@@ -93,7 +98,15 @@ def place_argument(measurement: dict) -> str:
     if detection not in _FY_DETECTION:
         raise MeasureError(f"'{detection}' is not a known detection, so {position} cannot be placed.")
     number = "ABCDEFGH".index(label.upper()) + 1
-    return f"{plate} {_SIDES[side.lower()]} {number} {_FY_DETECTION[detection]}"
+    side_word = _SIDES[side.lower()]
+    if plate_type.lower() in _WHOLE_FRAME_PLATES:
+        if side_word != "LEFT":
+            raise MeasureError(
+                f"A '{plate_type}' plate spans the whole frame and is listed on the left, "
+                f"so {position} cannot be placed."
+            )
+        side_word = "NONE"
+    return f"{plate} {side_word} {number} {_FY_DETECTION[detection]}"
 
 
 # ---- before the start -------------------------------------------------------------

@@ -207,7 +207,7 @@ class Science:
         span = e2 - e1
         mid = (e1 + e2) / 2.0
 
-        slit_h = 6.0 if plate_type == "8-circle" else 10.0
+        slit_h = 6.0 if plate_type in ("8-circle", "8-circle-gas") else 10.0
         if is_sdd or is_tfy:
             slit_h *= math.sin(math.radians(45.0))  # the sample is turned 45 degrees
         if beam == "focused":

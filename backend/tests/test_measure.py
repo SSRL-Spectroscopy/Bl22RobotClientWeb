@@ -506,13 +506,18 @@ def test_place_argument():
     assert place("8-circle", "Left-A", "transmission") == "8-CIRCLE LEFT 1 FALSE"
     assert place("8-slot", "Right-H", "transmission_tfy") == "8-SLOT RIGHT 8 TRUE"
     assert place("8-circle", "right-c", "transmission_sdd") == "8-CIRCLE RIGHT 3 TRUE"
-    for bad in (("8-circle-gas", "Left-A", "transmission"), ("8-circle", "Left-J", "transmission"),
+    assert place("8-circle-gas", "Left-A", "transmission") == "8-CIRCLE-AIR NONE 1 FALSE"
+    assert place("8-circle-gas", "Left-H", "transmission_sdd") == "8-CIRCLE-AIR NONE 8 TRUE"
+    for bad in (("16-well", "Left-A", "transmission"), ("8-circle-gas", "Right-A", "transmission"),
+                ("8-circle", "Left-J", "transmission"),
                 ("8-circle", "Middle-A", "transmission"), ("8-circle", "Left-A", "xes")):
         with pytest.raises(measure.MeasureError):
             place(*bad)
 
 
-async def test_a_plate_that_cannot_be_placed_stops_the_start(rig):
+async def test_a_plate_that_cannot_be_placed_stops_the_start(rig, monkeypatch):
+    # A plate type the portal knows but SAMPLE PLACE has no entry for.
+    monkeypatch.delitem(measure._PLATES, "8-circle-gas")
     rig.portal.frames["KQZ-TBW"]["positions"][0]["plate_type"] = "8-circle-gas"
     rig.add("KQZ-TBW", [M1])
     with pytest.raises(SequenceError, match="'8-circle-gas' plate .* has not been defined"):
